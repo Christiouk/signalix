@@ -1,7 +1,18 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
-import { Activity, BarChart3, Clock, Database, RefreshCw, Search, ShieldAlert, TrendingDown, TrendingUp } from "lucide-react";
+import React, { useEffect, useMemo, useState } from "react";
+import {
+  Activity,
+  BarChart3,
+  Clock,
+  Database,
+  RefreshCw,
+  Search,
+  ShieldAlert,
+  Trash2,
+  TrendingDown,
+  TrendingUp,
+} from "lucide-react";
 
 type Scan = {
   symbol: string;
@@ -28,9 +39,12 @@ type Scan = {
   summary: string;
   scanTime: string;
   scanDate: string;
+  createdAt: string;
 };
 
-const mockMarketProfiles: Record<string, Omit<Scan, "symbol" | "scanTime" | "scanDate">> = {
+const STORAGE_KEY = "signalix_scans_v1";
+
+const mockMarketProfiles: Record<string, Omit<Scan, "symbol" | "scanTime" | "scanDate" | "createdAt">> = {
   MARA: {
     name: "Marathon Digital Holdings",
     assetType: "US Equity",
@@ -103,6 +117,30 @@ const mockMarketProfiles: Record<string, Omit<Scan, "symbol" | "scanTime" | "sca
     summary:
       "Gold is neutral-to-bullish while holding above 2,325. A break above 2,345 improves the continuation case. Below 2,318, the setup weakens and price may revisit lower liquidity zones.",
   },
+  BTC: {
+    name: "Bitcoin",
+    assetType: "Crypto",
+    relatedAsset: "Crypto market liquidity",
+    price: 76442,
+    open: 75880,
+    high: 77120,
+    low: 75014,
+    volume: "Crypto volume varies",
+    rsi: 54,
+    macd: "Neutral-positive",
+    atr: 1850,
+    sentiment: "Mixed",
+    catalyst: "Risk appetite, ETF flows and dollar conditions",
+    support1: 75800,
+    support2: 75000,
+    resistance1: 77200,
+    resistance2: 78500,
+    invalidation: 75000,
+    bias: "Neutral to cautiously bullish",
+    confidence: 57,
+    summary:
+      "Bitcoin is constructive only while holding above 75,800. A clean break above 77,200 would improve the bullish case. If price loses 75,000, the intraday structure weakens and crypto-linked equities may come under pressure.",
+  },
 };
 
 function Card({ className = "", children }: { className?: string; children: React.ReactNode }) {
@@ -113,15 +151,24 @@ function Button({
   className = "",
   children,
   onClick,
+  variant = "primary",
 }: {
   className?: string;
   children: React.ReactNode;
   onClick?: () => void;
+  variant?: "primary" | "danger" | "secondary";
 }) {
+  const styles =
+    variant === "danger"
+      ? "border border-red-900/60 bg-red-950/40 text-red-200 hover:bg-red-950"
+      : variant === "secondary"
+        ? "border border-slate-800 bg-slate-950 text-slate-200 hover:bg-slate-900"
+        : "bg-white text-black hover:bg-slate-200";
+
   return (
     <button
       onClick={onClick}
-      className={`inline-flex items-center justify-center rounded-2xl bg-white px-6 py-3 font-semibold text-black transition hover:bg-slate-200 ${className}`}
+      className={`inline-flex items-center justify-center rounded-2xl px-6 py-3 font-semibold transition ${styles} ${className}`}
     >
       {children}
     </button>
@@ -131,6 +178,10 @@ function Button({
 function formatPrice(value: number) {
   if (value >= 1000) return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
   return value.toFixed(2);
+}
+
+function todayKey() {
+  return new Date().toLocaleDateString();
 }
 
 function getMockScan(symbol: string, previousScanCount: number): Scan {
@@ -161,17 +212,19 @@ function getMockScan(symbol: string, previousScanCount: number): Scan {
       confidence: 50,
       summary:
         "This is a placeholder scan. Once live APIs are connected, this card will return current price, indicators, sentiment, support, resistance, invalidation and trading bias.",
-    } satisfies Omit<Scan, "symbol" | "scanTime" | "scanDate">);
+    } satisfies Omit<Scan, "symbol" | "scanTime" | "scanDate" | "createdAt">);
 
   const drift = previousScanCount === 0 ? 0 : (previousScanCount * 0.37) / 100;
   const adjustedPrice = Number((base.price * (1 + drift)).toFixed(2));
+  const now = new Date();
 
   return {
     ...base,
     symbol: clean,
     price: adjustedPrice,
-    scanTime: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-    scanDate: new Date().toLocaleDateString(),
+    scanTime: now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    scanDate: now.toLocaleDateString(),
+    createdAt: now.toISOString(),
   };
 }
 
@@ -208,7 +261,7 @@ function ComparisonCard({ baseline, latest }: { baseline?: Scan; latest?: Scan }
 
   const change = ((latest.price - baseline.price) / baseline.price) * 100;
   const improved = latest.confidence >= baseline.confidence;
-  const sameScan = baseline.scanTime === latest.scanTime && baseline.symbol === latest.symbol;
+  const sameScan = baseline.createdAt === latest.createdAt;
 
   return (
     <Card className="border border-slate-800 bg-slate-950/70 shadow-2xl">
@@ -250,6 +303,32 @@ export default function SignalIXPage() {
   const [symbol, setSymbol] = useState("MARA");
   const [scans, setScans] = useState<Scan[]>([]);
   const [activeSymbol, setActiveSymbol] = useState("MARA");
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved) as Scan[];
+        const todaysScans = parsed.filter((scan) => scan.scanDate === todayKey());
+        setScans(todaysScans);
+
+        if (todaysScans.length > 0) {
+          setActiveSymbol(todaysScans[todaysScans.length - 1].symbol);
+          setSymbol(todaysScans[todaysScans.length - 1].symbol);
+        }
+      }
+    } catch {
+      setScans([]);
+    } finally {
+      setLoaded(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!loaded) return;
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(scans));
+  }, [scans, loaded]);
 
   const symbolScans = useMemo(() => scans.filter((scan) => scan.symbol === activeSymbol), [scans, activeSymbol]);
   const latest = symbolScans[symbolScans.length - 1];
@@ -258,33 +337,48 @@ export default function SignalIXPage() {
   function handleScan() {
     if (!symbol.trim()) return;
     const clean = symbol.trim().toUpperCase();
-    const previousCount = scans.filter((scan) => scan.symbol === clean).length;
+    const previousCount = scans.filter((scan) => scan.symbol === clean && scan.scanDate === todayKey()).length;
     const nextScan = getMockScan(clean, previousCount);
     setActiveSymbol(clean);
     setScans((current) => [...current, nextScan]);
+  }
+
+  function clearToday() {
+    setScans([]);
+    window.localStorage.removeItem(STORAGE_KEY);
   }
 
   return (
     <main className="min-h-screen bg-[#05070b] p-4 text-slate-100 md:p-8">
       <div className="mx-auto max-w-7xl">
         <section className="mb-8">
-          <div className="inline-flex items-center gap-2 rounded-full border border-slate-800 bg-slate-950 px-4 py-2 text-sm text-slate-400">
-            <Activity className="h-4 w-4" />
-            SignalIX · MVP Preview
+          <div className="flex flex-col justify-between gap-4 md:flex-row md:items-start">
+            <div>
+              <div className="inline-flex items-center gap-2 rounded-full border border-slate-800 bg-slate-950 px-4 py-2 text-sm text-slate-400">
+                <Activity className="h-4 w-4" />
+                SignalIX · MVP Preview
+              </div>
+
+              <h1 className="mt-5 text-4xl font-semibold tracking-tight text-white md:text-6xl">
+                Market scan. Signal memory. Daily comparison.
+              </h1>
+
+              <p className="mt-4 max-w-3xl text-lg text-slate-400">
+                Enter a stock, index, commodity or crypto. Press scan. The first scan of the day becomes the baseline, and every later scan is compared against it.
+              </p>
+            </div>
+
+            <div className="rounded-3xl border border-slate-800 bg-slate-950/70 p-4 text-sm text-slate-400 md:min-w-[240px]">
+              <div className="text-xs uppercase tracking-[0.2em] text-slate-500">Live domain</div>
+              <div className="mt-2 font-semibold text-white">signalix.cloud</div>
+              <div className="mt-1">Browser-saved scan memory active</div>
+            </div>
           </div>
-
-          <h1 className="mt-5 text-4xl font-semibold tracking-tight text-white md:text-6xl">
-            Market scan. Signal memory. Daily comparison.
-          </h1>
-
-          <p className="mt-4 max-w-3xl text-lg text-slate-400">
-            Enter a stock, index, commodity or crypto. Press scan. The first scan of the day becomes the baseline, and every later scan is compared against it.
-          </p>
         </section>
 
         <Card className="mb-6 border border-slate-800 bg-slate-950/80 shadow-2xl">
           <div className="p-5 md:p-6">
-            <div className="grid gap-4 md:grid-cols-[1fr_auto]">
+            <div className="grid gap-4 md:grid-cols-[1fr_auto_auto]">
               <div className="relative">
                 <Search className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-500" />
                 <input
@@ -300,6 +394,11 @@ export default function SignalIXPage() {
                 <RefreshCw className="mr-2 h-4 w-4" />
                 Scan
               </Button>
+
+              <Button onClick={clearToday} variant="secondary" className="h-14">
+                <Trash2 className="mr-2 h-4 w-4" />
+                Clear
+              </Button>
             </div>
           </div>
         </Card>
@@ -310,7 +409,7 @@ export default function SignalIXPage() {
               <BarChart3 className="mb-4 h-12 w-12 text-slate-500" />
               <h2 className="text-2xl font-semibold text-white">No scan yet</h2>
               <p className="mt-2 max-w-xl text-slate-400">
-                Press Scan to create the first baseline reading for today. Try MARA, DAX or GOLD in this preview.
+                Press Scan to create the first baseline reading for today. Try MARA, DAX, GOLD or BTC in this preview.
               </p>
             </div>
           </Card>
@@ -417,7 +516,7 @@ export default function SignalIXPage() {
 
                   <tbody>
                     {[...scans].reverse().map((scan, index) => (
-                      <tr key={`${scan.symbol}-${scan.scanTime}-${index}`} className="border-t border-slate-800 text-slate-300">
+                      <tr key={`${scan.symbol}-${scan.createdAt}-${index}`} className="border-t border-slate-800 text-slate-300">
                         <td className="p-3">{scan.scanTime}</td>
                         <td className="p-3 font-semibold text-white">{scan.symbol}</td>
                         <td className="p-3">{formatPrice(scan.price)}</td>
