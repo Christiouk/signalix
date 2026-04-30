@@ -144,7 +144,7 @@ const mockMarketProfiles: Record<string, Omit<Scan, "symbol" | "scanTime" | "sca
 };
 
 function Card({ className = "", children }: { className?: string; children: React.ReactNode }) {
-  return <div className={`rounded-3xl ${className}`}>{children}</div>;
+  return <div className={`rounded-2xl border border-slate-800 bg-slate-950/70 ${className}`}>{children}</div>;
 }
 
 function Button({
@@ -156,19 +156,17 @@ function Button({
   className?: string;
   children: React.ReactNode;
   onClick?: () => void;
-  variant?: "primary" | "danger" | "secondary";
+  variant?: "primary" | "secondary";
 }) {
   const styles =
-    variant === "danger"
-      ? "border border-red-900/60 bg-red-950/40 text-red-200 hover:bg-red-950"
-      : variant === "secondary"
-        ? "border border-slate-800 bg-slate-950 text-slate-200 hover:bg-slate-900"
-        : "bg-white text-black hover:bg-slate-200";
+    variant === "secondary"
+      ? "border border-slate-800 bg-slate-950 text-slate-200 hover:bg-slate-900"
+      : "bg-white text-black hover:bg-slate-200";
 
   return (
     <button
       onClick={onClick}
-      className={`inline-flex items-center justify-center rounded-2xl px-6 py-3 font-semibold transition ${styles} ${className}`}
+      className={`inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm font-semibold transition ${styles} ${className}`}
     >
       {children}
     </button>
@@ -228,11 +226,11 @@ function getMockScan(symbol: string, previousScanCount: number): Scan {
   };
 }
 
-function Metric({ label, value }: { label: string; value: React.ReactNode }) {
+function Metric({ label, value, compact = false }: { label: string; value: React.ReactNode; compact?: boolean }) {
   return (
-    <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
-      <div className="text-xs uppercase tracking-[0.18em] text-slate-500">{label}</div>
-      <div className="mt-2 text-lg font-semibold text-white">{value}</div>
+    <div className={`rounded-xl border border-slate-800 bg-black/25 ${compact ? "p-3" : "p-4"}`}>
+      <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500">{label}</div>
+      <div className={`${compact ? "mt-1 text-sm" : "mt-2 text-base"} font-semibold text-white`}>{value}</div>
     </div>
   );
 }
@@ -243,13 +241,13 @@ function BiasBadge({ bias }: { bias: string }) {
   const isNeutral = lower.includes("neutral");
 
   return (
-    <div className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900 px-3 py-1 text-sm text-slate-200">
+    <div className="inline-flex items-center gap-1.5 rounded-full border border-slate-700 bg-slate-900 px-2.5 py-1 text-xs text-slate-200">
       {isBullish ? (
-        <TrendingUp className="h-4 w-4" />
+        <TrendingUp className="h-3.5 w-3.5" />
       ) : isNeutral ? (
-        <Activity className="h-4 w-4" />
+        <Activity className="h-3.5 w-3.5" />
       ) : (
-        <TrendingDown className="h-4 w-4" />
+        <TrendingDown className="h-3.5 w-3.5" />
       )}
       {bias}
     </div>
@@ -260,40 +258,32 @@ function ComparisonCard({ baseline, latest }: { baseline?: Scan; latest?: Scan }
   if (!baseline || !latest) return null;
 
   const change = ((latest.price - baseline.price) / baseline.price) * 100;
-  const improved = latest.confidence >= baseline.confidence;
   const sameScan = baseline.createdAt === latest.createdAt;
 
   return (
-    <Card className="border border-slate-800 bg-slate-950/70 shadow-2xl">
-      <div className="p-6">
-        <div className="mb-5 flex items-center justify-between gap-3">
+    <Card>
+      <div className="p-4">
+        <div className="mb-3 flex items-center justify-between gap-3">
           <div>
-            <div className="text-sm uppercase tracking-[0.2em] text-slate-500">Daily comparison</div>
-            <h2 className="mt-1 text-2xl font-semibold text-white">First scan vs latest scan</h2>
+            <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Daily comparison</div>
+            <h2 className="mt-0.5 text-lg font-semibold text-white">First scan vs latest</h2>
           </div>
-          <Database className="h-6 w-6 text-slate-400" />
+          <Database className="h-4 w-4 text-slate-400" />
         </div>
 
-        <div className="grid gap-4 md:grid-cols-3">
-          <Metric label="First scan" value={`${baseline.scanTime} / ${formatPrice(baseline.price)}`} />
-          <Metric label="Latest scan" value={`${latest.scanTime} / ${formatPrice(latest.price)}`} />
-          <Metric label="Move from baseline" value={sameScan ? "Baseline created" : `${change >= 0 ? "+" : ""}${change.toFixed(2)}%`} />
+        <div className="grid gap-3 md:grid-cols-3">
+          <Metric compact label="First" value={`${baseline.scanTime} / ${formatPrice(baseline.price)}`} />
+          <Metric compact label="Latest" value={`${latest.scanTime} / ${formatPrice(latest.price)}`} />
+          <Metric compact label="Move" value={sameScan ? "Baseline" : `${change >= 0 ? "+" : ""}${change.toFixed(2)}%`} />
         </div>
 
-        <div className="mt-5 rounded-2xl border border-slate-800 bg-black/30 p-4 text-slate-300">
-          {sameScan ? (
-            <p>
-              This is the first scan of the day for {latest.symbol}. It is now saved as today’s baseline. Later scans will be compared against this reading.
-            </p>
-          ) : (
-            <p>
-              Since the first scan, {latest.symbol} has moved <span className="font-semibold text-white">{change >= 0 ? "higher" : "lower"}</span> by{" "}
-              <span className="font-semibold text-white">{Math.abs(change).toFixed(2)}%</span>. Confidence has{" "}
-              {improved ? "improved or remained stable" : "weakened"}. The latest bias is <span className="font-semibold text-white">{latest.bias}</span>,
-              compared with the initial bias of <span className="font-semibold text-white">{baseline.bias}</span>.
-            </p>
-          )}
-        </div>
+        <p className="mt-3 rounded-xl border border-slate-800 bg-black/25 p-3 text-sm leading-6 text-slate-300">
+          {sameScan
+            ? `First scan saved as today's baseline for ${latest.symbol}.`
+            : `${latest.symbol} is ${change >= 0 ? "higher" : "lower"} by ${Math.abs(change).toFixed(
+                2
+              )}% versus the first scan. Latest bias: ${latest.bias}.`}
+        </p>
       </div>
     </Card>
   );
@@ -349,186 +339,177 @@ export default function SignalIXPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#05070b] p-4 text-slate-100 md:p-8">
+    <main className="min-h-screen bg-[#05070b] p-3 text-slate-100 md:p-5">
       <div className="mx-auto max-w-7xl">
-        <section className="mb-8">
-          <div className="flex flex-col justify-between gap-4 md:flex-row md:items-start">
-            <div>
-              <div className="inline-flex items-center gap-2 rounded-full border border-slate-800 bg-slate-950 px-4 py-2 text-sm text-slate-400">
-                <Activity className="h-4 w-4" />
-                SignalIX · MVP Preview
+        <header className="mb-4 flex flex-col justify-between gap-3 border-b border-slate-900 pb-4 md:flex-row md:items-center">
+          <div>
+            <div className="flex items-center gap-2">
+              <div className="flex h-8 w-8 items-center justify-center rounded-xl border border-slate-800 bg-slate-950">
+                <Activity className="h-4 w-4 text-slate-300" />
               </div>
-
-              <h1 className="mt-5 text-4xl font-semibold tracking-tight text-white md:text-6xl">
-                Market scan. Signal memory. Daily comparison.
-              </h1>
-
-              <p className="mt-4 max-w-3xl text-lg text-slate-400">
-                Enter a stock, index, commodity or crypto. Press scan. The first scan of the day becomes the baseline, and every later scan is compared against it.
-              </p>
-            </div>
-
-            <div className="rounded-3xl border border-slate-800 bg-slate-950/70 p-4 text-sm text-slate-400 md:min-w-[240px]">
-              <div className="text-xs uppercase tracking-[0.2em] text-slate-500">Live domain</div>
-              <div className="mt-2 font-semibold text-white">signalix.cloud</div>
-              <div className="mt-1">Browser-saved scan memory active</div>
+              <div>
+                <h1 className="text-xl font-semibold tracking-tight text-white">SignalIX</h1>
+                <p className="text-xs text-slate-500">Market scan intelligence</p>
+              </div>
             </div>
           </div>
-        </section>
 
-        <Card className="mb-6 border border-slate-800 bg-slate-950/80 shadow-2xl">
-          <div className="p-5 md:p-6">
-            <div className="grid gap-4 md:grid-cols-[1fr_auto_auto]">
-              <div className="relative">
-                <Search className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-500" />
-                <input
-                  value={symbol}
-                  onChange={(event) => setSymbol(event.target.value)}
-                  onKeyDown={(event) => event.key === "Enter" && handleScan()}
-                  placeholder="Enter ticker: MARA, DAX, GOLD, BTC..."
-                  className="h-14 w-full rounded-2xl border border-slate-800 bg-black/40 pl-12 pr-4 text-lg text-white outline-none transition focus:border-slate-500"
-                />
-              </div>
+          <div className="flex flex-wrap gap-2 text-xs">
+            <span className="rounded-full border border-slate-800 bg-slate-950 px-3 py-1.5 text-slate-300">MVP</span>
+            <span className="rounded-full border border-slate-800 bg-slate-950 px-3 py-1.5 text-slate-300">signalix.cloud</span>
+            <span className="rounded-full border border-slate-800 bg-slate-950 px-3 py-1.5 text-slate-300">{scans.length} scans today</span>
+          </div>
+        </header>
 
-              <Button onClick={handleScan} className="h-14">
-                <RefreshCw className="mr-2 h-4 w-4" />
-                Scan
-              </Button>
-
-              <Button onClick={clearToday} variant="secondary" className="h-14">
-                <Trash2 className="mr-2 h-4 w-4" />
-                Clear
-              </Button>
+        <Card className="mb-4">
+          <div className="grid gap-3 p-3 md:grid-cols-[1fr_auto_auto]">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+              <input
+                value={symbol}
+                onChange={(event) => setSymbol(event.target.value)}
+                onKeyDown={(event) => event.key === "Enter" && handleScan()}
+                placeholder="Enter ticker: MARA, DAX, GOLD, BTC..."
+                className="h-11 w-full rounded-xl border border-slate-800 bg-black/40 pl-10 pr-4 text-sm text-white outline-none transition focus:border-slate-500"
+              />
             </div>
+
+            <Button onClick={handleScan} className="h-11">
+              <RefreshCw className="mr-2 h-4 w-4" />
+              Scan
+            </Button>
+
+            <Button onClick={clearToday} variant="secondary" className="h-11">
+              <Trash2 className="mr-2 h-4 w-4" />
+              Clear
+            </Button>
           </div>
         </Card>
 
         {!latest ? (
-          <Card className="border border-slate-800 bg-slate-950/70">
-            <div className="flex min-h-[320px] flex-col items-center justify-center p-10 text-center">
-              <BarChart3 className="mb-4 h-12 w-12 text-slate-500" />
-              <h2 className="text-2xl font-semibold text-white">No scan yet</h2>
-              <p className="mt-2 max-w-xl text-slate-400">
-                Press Scan to create the first baseline reading for today. Try MARA, DAX, GOLD or BTC in this preview.
-              </p>
+          <Card>
+            <div className="flex min-h-[220px] flex-col items-center justify-center p-8 text-center">
+              <BarChart3 className="mb-3 h-9 w-9 text-slate-500" />
+              <h2 className="text-xl font-semibold text-white">No scan yet</h2>
+              <p className="mt-2 max-w-xl text-sm text-slate-400">Press Scan to create the first baseline reading for today.</p>
             </div>
           </Card>
         ) : (
-          <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
-            <div className="space-y-6">
-              <Card className="border border-slate-800 bg-slate-950/70 shadow-2xl">
-                <div className="p-6">
-                  <div className="mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-start">
+          <div className="grid gap-4 xl:grid-cols-[1.35fr_0.65fr]">
+            <div className="space-y-4">
+              <Card>
+                <div className="p-4">
+                  <div className="mb-4 flex flex-col justify-between gap-3 md:flex-row md:items-start">
                     <div>
-                      <div className="flex items-center gap-3 text-sm text-slate-400">
-                        <Clock className="h-4 w-4" />
-                        Scan at {latest.scanTime} · {latest.assetType}
+                      <div className="flex items-center gap-2 text-xs text-slate-400">
+                        <Clock className="h-3.5 w-3.5" />
+                        {latest.scanTime} · {latest.assetType}
                       </div>
 
-                      <h2 className="mt-2 text-3xl font-semibold text-white md:text-4xl">
+                      <h2 className="mt-1 text-2xl font-semibold text-white">
                         {latest.symbol} — {latest.name}
                       </h2>
 
-                      <div className="mt-3">
+                      <div className="mt-2">
                         <BiasBadge bias={latest.bias} />
                       </div>
                     </div>
 
-                    <div className="rounded-3xl border border-slate-800 bg-black/40 p-5 text-right">
-                      <div className="text-xs uppercase tracking-[0.2em] text-slate-500">Current price</div>
-                      <div className="mt-1 text-4xl font-semibold text-white">{formatPrice(latest.price)}</div>
-                      <div className="mt-1 text-sm text-slate-400">Confidence {latest.confidence}%</div>
+                    <div className="rounded-2xl border border-slate-800 bg-black/30 p-4 text-right">
+                      <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Price</div>
+                      <div className="text-3xl font-semibold text-white">{formatPrice(latest.price)}</div>
+                      <div className="text-xs text-slate-400">Confidence {latest.confidence}%</div>
                     </div>
                   </div>
 
-                  <div className="grid gap-4 md:grid-cols-4">
-                    <Metric label="Open" value={formatPrice(latest.open)} />
-                    <Metric label="High" value={formatPrice(latest.high)} />
-                    <Metric label="Low" value={formatPrice(latest.low)} />
-                    <Metric label="Volume" value={latest.volume} />
+                  <div className="grid gap-3 md:grid-cols-4">
+                    <Metric compact label="Open" value={formatPrice(latest.open)} />
+                    <Metric compact label="High" value={formatPrice(latest.high)} />
+                    <Metric compact label="Low" value={formatPrice(latest.low)} />
+                    <Metric compact label="Volume" value={latest.volume} />
                   </div>
 
-                  <div className="mt-6 rounded-3xl border border-slate-800 bg-black/30 p-5">
-                    <div className="mb-2 text-sm uppercase tracking-[0.2em] text-slate-500">Signal read</div>
-                    <p className="text-lg leading-8 text-slate-200">{latest.summary}</p>
+                  <div className="mt-4 rounded-2xl border border-slate-800 bg-black/25 p-4">
+                    <div className="mb-1 text-[10px] uppercase tracking-[0.2em] text-slate-500">Signal read</div>
+                    <p className="text-sm leading-6 text-slate-200">{latest.summary}</p>
                   </div>
                 </div>
               </Card>
 
               <ComparisonCard baseline={baseline} latest={latest} />
+
+              {scans.length > 0 && (
+                <Card>
+                  <div className="p-4">
+                    <h3 className="mb-3 text-lg font-semibold text-white">Today’s scan history</h3>
+
+                    <div className="overflow-hidden rounded-xl border border-slate-800">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-black/40 text-slate-500">
+                          <tr>
+                            <th className="p-2.5">Time</th>
+                            <th className="p-2.5">Symbol</th>
+                            <th className="p-2.5">Price</th>
+                            <th className="p-2.5">Bias</th>
+                            <th className="p-2.5">Confidence</th>
+                          </tr>
+                        </thead>
+
+                        <tbody>
+                          {[...scans].reverse().map((scan, index) => (
+                            <tr key={`${scan.symbol}-${scan.createdAt}-${index}`} className="border-t border-slate-800 text-slate-300">
+                              <td className="p-2.5">{scan.scanTime}</td>
+                              <td className="p-2.5 font-semibold text-white">{scan.symbol}</td>
+                              <td className="p-2.5">{formatPrice(scan.price)}</td>
+                              <td className="p-2.5">{scan.bias}</td>
+                              <td className="p-2.5">{scan.confidence}%</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </Card>
+              )}
             </div>
 
-            <div className="space-y-6">
-              <Card className="border border-slate-800 bg-slate-950/70 shadow-2xl">
-                <div className="p-6">
-                  <div className="mb-5 flex items-center justify-between">
-                    <h3 className="text-xl font-semibold text-white">Technical & sentiment</h3>
-                    <Activity className="h-5 w-5 text-slate-400" />
+            <div className="space-y-4">
+              <Card>
+                <div className="p-4">
+                  <div className="mb-3 flex items-center justify-between">
+                    <h3 className="text-lg font-semibold text-white">Technicals</h3>
+                    <Activity className="h-4 w-4 text-slate-400" />
                   </div>
 
-                  <div className="space-y-3">
-                    <Metric label="RSI" value={latest.rsi} />
-                    <Metric label="MACD" value={latest.macd} />
-                    <Metric label="ATR" value={latest.atr} />
-                    <Metric label="Sentiment" value={latest.sentiment} />
-                    <Metric label="Related asset" value={latest.relatedAsset} />
-                    <Metric label="Catalyst" value={latest.catalyst} />
+                  <div className="grid gap-3">
+                    <Metric compact label="RSI" value={latest.rsi} />
+                    <Metric compact label="MACD" value={latest.macd} />
+                    <Metric compact label="ATR" value={latest.atr} />
+                    <Metric compact label="Sentiment" value={latest.sentiment} />
+                    <Metric compact label="Related" value={latest.relatedAsset} />
+                    <Metric compact label="Catalyst" value={latest.catalyst} />
                   </div>
                 </div>
               </Card>
 
-              <Card className="border border-slate-800 bg-slate-950/70 shadow-2xl">
-                <div className="p-6">
-                  <div className="mb-5 flex items-center justify-between">
-                    <h3 className="text-xl font-semibold text-white">Levels</h3>
-                    <ShieldAlert className="h-5 w-5 text-slate-400" />
+              <Card>
+                <div className="p-4">
+                  <div className="mb-3 flex items-center justify-between">
+                    <h3 className="text-lg font-semibold text-white">Levels</h3>
+                    <ShieldAlert className="h-4 w-4 text-slate-400" />
                   </div>
 
                   <div className="grid gap-3">
-                    <Metric label="Support 1" value={formatPrice(latest.support1)} />
-                    <Metric label="Support 2" value={formatPrice(latest.support2)} />
-                    <Metric label="Resistance 1" value={formatPrice(latest.resistance1)} />
-                    <Metric label="Resistance 2" value={formatPrice(latest.resistance2)} />
-                    <Metric label="Invalidation" value={formatPrice(latest.invalidation)} />
+                    <Metric compact label="Support 1" value={formatPrice(latest.support1)} />
+                    <Metric compact label="Support 2" value={formatPrice(latest.support2)} />
+                    <Metric compact label="Resistance 1" value={formatPrice(latest.resistance1)} />
+                    <Metric compact label="Resistance 2" value={formatPrice(latest.resistance2)} />
+                    <Metric compact label="Invalidation" value={formatPrice(latest.invalidation)} />
                   </div>
                 </div>
               </Card>
             </div>
           </div>
-        )}
-
-        {scans.length > 0 && (
-          <Card className="mt-6 border border-slate-800 bg-slate-950/70 shadow-2xl">
-            <div className="p-6">
-              <h3 className="mb-4 text-xl font-semibold text-white">Today’s scan history</h3>
-
-              <div className="overflow-hidden rounded-2xl border border-slate-800">
-                <table className="w-full text-left text-sm">
-                  <thead className="bg-black/40 text-slate-500">
-                    <tr>
-                      <th className="p-3">Time</th>
-                      <th className="p-3">Symbol</th>
-                      <th className="p-3">Price</th>
-                      <th className="p-3">Bias</th>
-                      <th className="p-3">Confidence</th>
-                    </tr>
-                  </thead>
-
-                  <tbody>
-                    {[...scans].reverse().map((scan, index) => (
-                      <tr key={`${scan.symbol}-${scan.createdAt}-${index}`} className="border-t border-slate-800 text-slate-300">
-                        <td className="p-3">{scan.scanTime}</td>
-                        <td className="p-3 font-semibold text-white">{scan.symbol}</td>
-                        <td className="p-3">{formatPrice(scan.price)}</td>
-                        <td className="p-3">{scan.bias}</td>
-                        <td className="p-3">{scan.confidence}%</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </Card>
         )}
       </div>
     </main>
