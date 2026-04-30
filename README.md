@@ -1,0 +1,2 @@
+# signalix
+Trading Signals
