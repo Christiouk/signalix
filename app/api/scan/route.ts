@@ -20,6 +20,7 @@ type NewsItem = {
 
 type ScanResponse = {
   symbol: string;
+  querySymbol: string;
   name: string;
   assetType: string;
   relatedAsset: string;
@@ -83,33 +84,6 @@ type NumericCandle = {
   volume: number;
 };
 
-type TwelveQuote = {
-  symbol?: string;
-  name?: string;
-  exchange?: string;
-  mic_code?: string;
-  currency?: string;
-  datetime?: string;
-  timestamp?: number;
-  open?: string;
-  high?: string;
-  low?: string;
-  close?: string;
-  volume?: string;
-  previous_close?: string;
-  change?: string;
-  percent_change?: string;
-  average_volume?: string;
-  is_market_open?: boolean;
-  fifty_two_week?: {
-    low?: string;
-    high?: string;
-  };
-  status?: string;
-  message?: string;
-  code?: number;
-};
-
 type TwelveTimeSeries = {
   meta?: {
     symbol?: string;
@@ -131,7 +105,7 @@ const MAX_SYMBOLS = 5;
 
 const mockMarketProfiles: Record<
   string,
-  Omit<ScanResponse, "symbol" | "scanTime" | "scanDate" | "createdAt" | "timeframe" | "source" | "warning">
+  Omit<ScanResponse, "symbol" | "querySymbol" | "scanTime" | "scanDate" | "createdAt" | "timeframe" | "source" | "warning">
 > = {
   MARA: {
     name: "Marathon Digital Holdings",
@@ -143,7 +117,7 @@ const mockMarketProfiles: Record<
     low: 10.68,
     volume: "7.23M",
     rsi: 58,
-    macd: "Positive but flattening",
+    macd: "positive",
     atr: 0.48,
     sentiment: "Mixed-positive",
     catalyst: "Bitcoin correlation and crypto miner sector sensitivity",
@@ -156,7 +130,7 @@ const mockMarketProfiles: Record<
     confidence: 64,
     news: [
       {
-        headline: "News feed ready for live connection",
+        headline: "News layer pending. Next step: connect Grok/XAI sentiment.",
         source: "SignalIX",
       },
     ],
@@ -166,7 +140,7 @@ const mockMarketProfiles: Record<
       movingAverages: { signal: "Strong buy", sell: 2, neutral: 1, buy: 12 },
     },
     summary:
-      "MARA is bullish intraday while holding above 11.30. A clean break and hold above 11.50 would support continuation toward 11.80–12.00. If price loses 11.10, the bullish setup weakens. Below 10.68, the setup is invalidated.",
+      "MARA is bullish intraday while holding above 11.30. A clean break and hold above 11.50 would support continuation toward 11.80–12.00. Below 10.68, the bullish read is invalidated.",
   },
 
   BTC: {
@@ -179,7 +153,7 @@ const mockMarketProfiles: Record<
     low: 75014,
     volume: "Crypto volume varies",
     rsi: 54,
-    macd: "Neutral-positive",
+    macd: "neutral",
     atr: 1850,
     sentiment: "Mixed",
     catalyst: "Crypto liquidity, ETF flows, dollar conditions and risk appetite",
@@ -192,7 +166,7 @@ const mockMarketProfiles: Record<
     confidence: 57,
     news: [
       {
-        headline: "Crypto news feed pending broader crypto-news provider",
+        headline: "News layer pending. Next step: connect Grok/XAI sentiment.",
         source: "SignalIX",
       },
     ],
@@ -202,7 +176,7 @@ const mockMarketProfiles: Record<
       movingAverages: { signal: "Buy", sell: 3, neutral: 3, buy: 10 },
     },
     summary:
-      "Bitcoin is constructive only while holding above 75,800. A clean break above 77,200 would improve the bullish case. If price loses 75,000, the intraday structure weakens and crypto-linked equities may come under pressure.",
+      "Bitcoin is constructive only while holding above 75,800. A clean break above 77,200 would improve the bullish case. Below 75,000, the structure weakens.",
   },
 };
 
@@ -262,6 +236,13 @@ function round(value: number, digits = 2) {
   return Math.round(value * factor) / factor;
 }
 
+function formatPriceForSummary(value: number) {
+  if (!Number.isFinite(value)) return "0";
+  if (Math.abs(value) >= 1000) return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  if (Math.abs(value) >= 10) return value.toFixed(2);
+  return value.toFixed(4).replace(/\.?0+$/, "");
+}
+
 function formatVolume(value: unknown) {
   const number = safeNumber(value, 0);
 
@@ -275,6 +256,41 @@ function formatVolume(value: unknown) {
 
 function normalizeSymbol(raw: string) {
   return raw.trim().toUpperCase().replace(/\s+/g, "");
+}
+
+function mapSymbolForTwelveData(symbol: string) {
+  const upper = normalizeSymbol(symbol);
+
+  const aliases: Record<string, string> = {
+    BTC: "BTC/USD",
+    BTCUSD: "BTC/USD",
+    BITCOIN: "BTC/USD",
+    ETH: "ETH/USD",
+    ETHUSD: "ETH/USD",
+    GOLD: "XAU/USD",
+    XAU: "XAU/USD",
+    XAUUSD: "XAU/USD",
+    SILVER: "XAG/USD",
+    XAG: "XAG/USD",
+    XAGUSD: "XAG/USD",
+    OIL: "WTI/USD",
+    WTI: "WTI/USD",
+    USOIL: "WTI/USD",
+  };
+
+  return aliases[upper] || upper;
+}
+
+function displaySymbolFromInput(symbol: string) {
+  const upper = normalizeSymbol(symbol);
+
+  if (upper === "BTCUSD" || upper === "BITCOIN") return "BTC";
+  if (upper === "ETHUSD") return "ETH";
+  if (upper === "XAU" || upper === "XAUUSD") return "GOLD";
+  if (upper === "XAG" || upper === "XAGUSD") return "SILVER";
+  if (upper === "WTI" || upper === "USOIL") return "OIL";
+
+  return upper;
 }
 
 function parseSymbols(request: Request) {
@@ -301,7 +317,7 @@ function parseSymbols(request: Request) {
 
 function getFallbackProfile(
   symbol: string
-): Omit<ScanResponse, "symbol" | "scanTime" | "scanDate" | "createdAt" | "timeframe" | "source" | "warning"> {
+): Omit<ScanResponse, "symbol" | "querySymbol" | "scanTime" | "scanDate" | "createdAt" | "timeframe" | "source" | "warning"> {
   return (
     mockMarketProfiles[symbol] ?? {
       name: `${symbol} Market Instrument`,
@@ -313,10 +329,10 @@ function getFallbackProfile(
       low: 98.6,
       volume: "Pending API",
       rsi: 52,
-      macd: "Neutral",
+      macd: "neutral",
       atr: 2.4,
       sentiment: "Pending live sentiment feed",
-      catalyst: "No live news connected yet",
+      catalyst: "No live catalyst connected yet",
       support1: 99,
       support2: 97.8,
       resistance1: 102,
@@ -326,7 +342,7 @@ function getFallbackProfile(
       confidence: 50,
       news: [
         {
-          headline: "News feed not connected for this symbol yet",
+          headline: "News layer pending. Next step: connect Grok/XAI sentiment.",
           source: "SignalIX",
         },
       ],
@@ -336,19 +352,21 @@ function getFallbackProfile(
         movingAverages: { signal: "Neutral", sell: 5, neutral: 5, buy: 5 },
       },
       summary:
-        "This is a placeholder scan. Once live APIs are connected for this symbol, SignalIX will return current price, indicators, sentiment, support, resistance, invalidation and trading bias.",
+        "This is a fallback scan. Once live data is available for this symbol, SignalIX will return current price, indicators, support, resistance, invalidation and trading bias.",
     }
   );
 }
 
 function buildFallbackScan(symbol: string, timeframe: Timeframe, warning?: string): ScanResponse {
   const now = new Date();
-  const base = getFallbackProfile(symbol);
+  const displaySymbol = displaySymbolFromInput(symbol);
+  const base = getFallbackProfile(displaySymbol);
   const adjustment = confidenceAdjustment(timeframe);
 
   return {
     ...base,
-    symbol,
+    symbol: displaySymbol,
+    querySymbol: mapSymbolForTwelveData(symbol),
     timeframe,
     source: "fallback",
     warning,
@@ -507,7 +525,7 @@ function calculateAtr(candles: NumericCandle[], fallback: number) {
   const recent = trueRanges.slice(-14);
   if (recent.length === 0) return fallback;
 
-  return round(average(recent), 2);
+  return round(average(recent), 4);
 }
 
 function calculateSupportResistance(candles: NumericCandle[], currentPrice: number) {
@@ -533,11 +551,11 @@ function calculateSupportResistance(candles: NumericCandle[], currentPrice: numb
   const resistance2 = above.length > 1 ? above[Math.max(0, above.length - 3)] : currentPrice * 1.015;
 
   return {
-    support1: round(support1, 2),
-    support2: round(support2, 2),
-    resistance1: round(resistance1, 2),
-    resistance2: round(resistance2, 2),
-    invalidation: round(support2, 2),
+    support1: round(support1, 4),
+    support2: round(support2, 4),
+    resistance1: round(resistance1, 4),
+    resistance2: round(resistance2, 4),
+    invalidation: round(support2, 4),
   };
 }
 
@@ -607,10 +625,10 @@ function signalFromScore(score: number): MeterSignal {
 }
 
 function buildBias(summarySignal: MeterSignal, support1: number, resistance1: number) {
-  if (summarySignal === "Strong buy") return `Strong buy above ${support1}`;
-  if (summarySignal === "Buy") return `Bullish above ${support1}`;
-  if (summarySignal === "Strong sell") return `Strong sell below ${resistance1}`;
-  if (summarySignal === "Sell") return `Bearish below ${resistance1}`;
+  if (summarySignal === "Strong buy") return `Strong buy above ${formatPriceForSummary(support1)}`;
+  if (summarySignal === "Buy") return `Bullish above ${formatPriceForSummary(support1)}`;
+  if (summarySignal === "Strong sell") return `Strong sell below ${formatPriceForSummary(resistance1)}`;
+  if (summarySignal === "Sell") return `Bearish below ${formatPriceForSummary(resistance1)}`;
   return "Neutral / waiting for confirmation";
 }
 
@@ -650,15 +668,22 @@ function compactSummary({
   macdText: string;
   timeframe: Timeframe;
 }) {
+  const priceText = formatPriceForSummary(price);
+  const support1Text = formatPriceForSummary(support1);
+  const support2Text = formatPriceForSummary(support2);
+  const resistance1Text = formatPriceForSummary(resistance1);
+  const resistance2Text = formatPriceForSummary(resistance2);
+  const invalidationText = formatPriceForSummary(invalidation);
+
   if (summarySignal === "Buy" || summarySignal === "Strong buy") {
-    return `${symbol} is bullish on ${timeframe} around ${price}. Holds above ${support1} keeps the setup valid. Break above ${resistance1} opens ${resistance2}. RSI ${rsi}, MACD ${macdText}. Invalidation below ${invalidation}.`;
+    return `${symbol} is bullish on ${timeframe} around ${priceText}. Holds above ${support1Text} keeps the setup valid. Break above ${resistance1Text} opens ${resistance2Text}. RSI ${rsi}, MACD ${macdText}. Invalidation below ${invalidationText}.`;
   }
 
   if (summarySignal === "Sell" || summarySignal === "Strong sell") {
-    return `${symbol} is bearish on ${timeframe} around ${price}. Stays weak below ${resistance1}. Loss of ${support1} opens ${support2}. RSI ${rsi}, MACD ${macdText}. Recovery above ${resistance2} reduces the bearish read.`;
+    return `${symbol} is bearish on ${timeframe} around ${priceText}. Stays weak below ${resistance1Text}. Loss of ${support1Text} opens ${support2Text}. RSI ${rsi}, MACD ${macdText}. Recovery above ${resistance2Text} reduces the bearish read.`;
   }
 
-  return `${symbol} is neutral on ${timeframe} around ${price}. Range: ${support1} support / ${resistance1} resistance. Break above ${resistance1} improves; loss of ${support1} weakens. RSI ${rsi}, MACD ${macdText}.`;
+  return `${symbol} is neutral on ${timeframe} around ${priceText}. Range: ${support1Text} support / ${resistance1Text} resistance. Break above ${resistance1Text} improves; loss of ${support1Text} weakens. RSI ${rsi}, MACD ${macdText}.`;
 }
 
 function inferRelatedAsset(symbol: string, assetType: string) {
@@ -717,23 +742,32 @@ function inferCatalyst(symbol: string, assetType: string, relatedAsset: string) 
 function noNewsYet(symbol: string): NewsItem[] {
   return [
     {
-      headline: `News layer pending for ${symbol}. Next step: connect a separate news provider.`,
+      headline: `News layer pending for ${symbol}. Next step: connect Grok/XAI sentiment.`,
       source: "SignalIX",
     },
   ];
 }
 
-async function buildLiveScan(symbol: string, timeframe: Timeframe): Promise<ScanResponse> {
+function getTimeSeriesLatestCandle(candlesNewestFirst: NumericCandle[]) {
+  const latest = candlesNewestFirst[0];
+
+  if (!latest) {
+    throw new Error("No latest candle available.");
+  }
+
+  return latest;
+}
+
+async function buildLiveScan(inputSymbol: string, timeframe: Timeframe): Promise<ScanResponse> {
+  const displaySymbol = displaySymbolFromInput(inputSymbol);
+  const querySymbol = mapSymbolForTwelveData(inputSymbol);
   const interval = toTwelveInterval(timeframe);
 
-  const [quote, timeSeries] = await Promise.all([
-    fetchTwelve<TwelveQuote>("quote", { symbol }),
-    fetchTwelve<TwelveTimeSeries>("time_series", {
-      symbol,
-      interval,
-      outputsize: "100",
-    }),
-  ]);
+  const timeSeries = await fetchTwelve<TwelveTimeSeries>("time_series", {
+    symbol: querySymbol,
+    interval,
+    outputsize: "100",
+  });
 
   const rawCandles = timeSeries.values ?? [];
 
@@ -748,18 +782,18 @@ async function buildLiveScan(symbol: string, timeframe: Timeframe): Promise<Scan
     throw new Error("Not enough candle data returned by Twelve Data.");
   }
 
-  const latestCandle = candlesNewestFirst[0];
+  const latestCandle = getTimeSeriesLatestCandle(candlesNewestFirst);
 
-  const price = round(safeNumber(quote.close, latestCandle.close), 2);
+  const price = round(latestCandle.close, 4);
 
   if (!price) {
     throw new Error("No valid price returned by Twelve Data.");
   }
 
-  const open = round(safeNumber(quote.open, latestCandle.open), 2);
-  const high = round(safeNumber(quote.high, latestCandle.high), 2);
-  const low = round(safeNumber(quote.low, latestCandle.low), 2);
-  const volume = formatVolume(quote.volume || latestCandle.volume);
+  const open = round(latestCandle.open, 4);
+  const high = round(latestCandle.high, 4);
+  const low = round(latestCandle.low, 4);
+  const volume = formatVolume(latestCandle.volume);
 
   const closes = candlesOldestFirst.map((candle) => candle.close);
 
@@ -776,7 +810,7 @@ async function buildLiveScan(symbol: string, timeframe: Timeframe): Promise<Scan
   const ma20 = calculateSma(closes, 20);
   const ma50 = calculateSma(closes, 50);
 
-  const atr = calculateAtr(candlesOldestFirst, round(high - low, 2));
+  const atr = calculateAtr(candlesOldestFirst, round(high - low, 4));
   const levels = calculateSupportResistance(candlesOldestFirst, price);
 
   const oscillatorSignal = signalFromScore(
@@ -797,11 +831,12 @@ async function buildLiveScan(symbol: string, timeframe: Timeframe): Promise<Scan
     movingAverages: signalToCounts(movingAverageSignal, 15),
   };
 
-  const name = quote.name || timeSeries.meta?.symbol || symbol;
-  const assetType = timeSeries.meta?.type || "Market instrument";
-  const relatedAsset = inferRelatedAsset(symbol, assetType);
+  const metaSymbol = timeSeries.meta?.symbol || querySymbol;
+  const name = metaSymbol === querySymbol ? displaySymbol : metaSymbol;
+  const assetType = timeSeries.meta?.type || inferAssetType(displaySymbol, querySymbol);
+  const relatedAsset = inferRelatedAsset(displaySymbol, assetType);
   const sentiment = inferSentiment(summarySignal, rsi);
-  const catalyst = inferCatalyst(symbol, assetType, relatedAsset);
+  const catalyst = inferCatalyst(displaySymbol, assetType, relatedAsset);
 
   const bias = buildBias(summarySignal, levels.support1, levels.resistance1);
   const confidence = buildConfidence(summarySignal, rsi, price, levels.support1, levels.resistance1, timeframe);
@@ -809,7 +844,8 @@ async function buildLiveScan(symbol: string, timeframe: Timeframe): Promise<Scan
   const now = new Date();
 
   return {
-    symbol,
+    symbol: displaySymbol,
+    querySymbol,
     name,
     assetType,
     relatedAsset,
@@ -831,11 +867,11 @@ async function buildLiveScan(symbol: string, timeframe: Timeframe): Promise<Scan
     bias,
     confidence,
     meters,
-    news: noNewsYet(symbol),
+    news: noNewsYet(displaySymbol),
     timeframe,
     source: "live",
     summary: compactSummary({
-      symbol,
+      symbol: displaySymbol,
       price,
       support1: levels.support1,
       support2: levels.support2,
@@ -851,6 +887,16 @@ async function buildLiveScan(symbol: string, timeframe: Timeframe): Promise<Scan
     scanDate: now.toLocaleDateString(),
     createdAt: now.toISOString(),
   };
+}
+
+function inferAssetType(displaySymbol: string, querySymbol: string) {
+  if (querySymbol.includes("/")) {
+    if (displaySymbol === "BTC" || displaySymbol === "ETH") return "Crypto";
+    if (displaySymbol === "GOLD" || displaySymbol === "SILVER" || displaySymbol === "OIL") return "Commodity";
+    return "Forex / pair";
+  }
+
+  return "Market instrument";
 }
 
 async function scanSymbol(symbol: string, timeframe: Timeframe): Promise<ScanResponse> {
