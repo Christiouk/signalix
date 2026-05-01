@@ -18,7 +18,6 @@ import {
 
 type ThemeMode = "navy" | "light";
 type Timeframe = "1m" | "5m" | "15m" | "1h" | "4h" | "1D";
-
 type MeterSignal = "Strong sell" | "Sell" | "Neutral" | "Buy" | "Strong buy";
 
 type Meter = {
@@ -54,6 +53,7 @@ type Scan = {
   scanTime: string;
   scanDate: string;
   createdAt: string;
+  timeframe: Timeframe;
   meters: {
     oscillators: Meter;
     summary: Meter;
@@ -84,6 +84,7 @@ const theme = {
     tableRow: "border-slate-800 text-slate-300",
     activeTab: "bg-white text-black border-white",
     tab: "border-slate-800 bg-slate-950 text-slate-400 hover:bg-slate-900",
+    error: "border-red-900/60 bg-red-950/30 text-red-200",
   },
   light: {
     page: "bg-slate-100 text-slate-950",
@@ -101,125 +102,7 @@ const theme = {
     tableRow: "border-slate-200 text-slate-700",
     activeTab: "bg-slate-950 text-white border-slate-950",
     tab: "border-slate-300 bg-white text-slate-600 hover:bg-slate-100",
-  },
-};
-
-const mockMarketProfiles: Record<string, Omit<Scan, "symbol" | "scanTime" | "scanDate" | "createdAt">> = {
-  MARA: {
-    name: "Marathon Digital Holdings",
-    assetType: "US Equity",
-    relatedAsset: "Bitcoin",
-    price: 11.4,
-    open: 11.09,
-    high: 11.44,
-    low: 10.68,
-    volume: "7.23M",
-    rsi: 58,
-    macd: "Positive but flattening",
-    atr: 0.48,
-    sentiment: "Mixed-positive",
-    catalyst: "Bitcoin correlation and infrastructure expansion headlines",
-    support1: 11.1,
-    support2: 10.68,
-    resistance1: 11.5,
-    resistance2: 12.0,
-    invalidation: 10.68,
-    bias: "Cautiously bullish",
-    confidence: 64,
-    meters: {
-      oscillators: { signal: "Neutral", sell: 1, neutral: 9, buy: 1 },
-      summary: { signal: "Buy", sell: 3, neutral: 10, buy: 13 },
-      movingAverages: { signal: "Strong buy", sell: 2, neutral: 1, buy: 12 },
-    },
-    summary:
-      "MARA is bullish intraday while holding above 11.30. A clean break and hold above 11.50 would support continuation toward 11.80–12.00. If price loses 11.10, the bullish setup weakens. Below 10.68, the setup is invalidated.",
-  },
-  DAX: {
-    name: "Germany 40 Index",
-    assetType: "Index",
-    relatedAsset: "EUR/USD",
-    price: 23480,
-    open: 23420,
-    high: 23525,
-    low: 23370,
-    volume: "Index volume varies",
-    rsi: 61,
-    macd: "Positive momentum",
-    atr: 142,
-    sentiment: "Constructive but sensitive to US futures",
-    catalyst: "European risk-on tone and German industrial names holding bid",
-    support1: 23420,
-    support2: 23370,
-    resistance1: 23520,
-    resistance2: 23620,
-    invalidation: 23370,
-    bias: "Bullish above support",
-    confidence: 67,
-    meters: {
-      oscillators: { signal: "Buy", sell: 2, neutral: 6, buy: 4 },
-      summary: { signal: "Buy", sell: 2, neutral: 8, buy: 15 },
-      movingAverages: { signal: "Strong buy", sell: 1, neutral: 2, buy: 14 },
-    },
-    summary:
-      "DAX is constructive while holding above 23,420. A break above 23,520 would confirm continuation. If the index loses 23,370, the bullish intraday setup fails and a deeper pullback becomes likely.",
-  },
-  GOLD: {
-    name: "Gold Spot",
-    assetType: "Commodity",
-    relatedAsset: "USD / Yields",
-    price: 2335,
-    open: 2328,
-    high: 2342,
-    low: 2319,
-    volume: "Spot liquidity",
-    rsi: 55,
-    macd: "Neutral-positive",
-    atr: 31,
-    sentiment: "Defensive bid",
-    catalyst: "Dollar and real-yield sensitivity",
-    support1: 2325,
-    support2: 2318,
-    resistance1: 2345,
-    resistance2: 2360,
-    invalidation: 2318,
-    bias: "Neutral to bullish",
-    confidence: 59,
-    meters: {
-      oscillators: { signal: "Neutral", sell: 3, neutral: 7, buy: 3 },
-      summary: { signal: "Neutral", sell: 5, neutral: 10, buy: 7 },
-      movingAverages: { signal: "Buy", sell: 3, neutral: 4, buy: 9 },
-    },
-    summary:
-      "Gold is neutral-to-bullish while holding above 2,325. A break above 2,345 improves the continuation case. Below 2,318, the setup weakens and price may revisit lower liquidity zones.",
-  },
-  BTC: {
-    name: "Bitcoin",
-    assetType: "Crypto",
-    relatedAsset: "Crypto market liquidity",
-    price: 76442,
-    open: 75880,
-    high: 77120,
-    low: 75014,
-    volume: "Crypto volume varies",
-    rsi: 54,
-    macd: "Neutral-positive",
-    atr: 1850,
-    sentiment: "Mixed",
-    catalyst: "Risk appetite, ETF flows and dollar conditions",
-    support1: 75800,
-    support2: 75000,
-    resistance1: 77200,
-    resistance2: 78500,
-    invalidation: 75000,
-    bias: "Neutral to cautiously bullish",
-    confidence: 57,
-    meters: {
-      oscillators: { signal: "Neutral", sell: 3, neutral: 8, buy: 3 },
-      summary: { signal: "Buy", sell: 4, neutral: 8, buy: 11 },
-      movingAverages: { signal: "Buy", sell: 3, neutral: 3, buy: 10 },
-    },
-    summary:
-      "Bitcoin is constructive only while holding above 75,800. A clean break above 77,200 would improve the bullish case. If price loses 75,000, the intraday structure weakens and crypto-linked equities may come under pressure.",
+    error: "border-red-200 bg-red-50 text-red-700",
   },
 };
 
@@ -241,12 +124,14 @@ function Button({
   onClick,
   variant = "primary",
   mode,
+  disabled = false,
 }: {
   className?: string;
   children: React.ReactNode;
   onClick?: () => void;
   variant?: "primary" | "secondary";
   mode: ThemeMode;
+  disabled?: boolean;
 }) {
   const styles =
     variant === "secondary"
@@ -258,7 +143,8 @@ function Button({
   return (
     <button
       onClick={onClick}
-      className={`inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm font-semibold transition ${styles} ${className}`}
+      disabled={disabled}
+      className={`inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${styles} ${className}`}
     >
       {children}
     </button>
@@ -272,59 +158,6 @@ function formatPrice(value: number) {
 
 function todayKey() {
   return new Date().toLocaleDateString();
-}
-
-function getMockScan(symbol: string, previousScanCount: number, timeframe: Timeframe): Scan {
-  const clean = symbol.trim().toUpperCase();
-
-  const base =
-    mockMarketProfiles[clean] ||
-    ({
-      name: `${clean} Market Instrument`,
-      assetType: "Manual mapping required",
-      relatedAsset: "Market context",
-      price: 100 + previousScanCount * 1.15,
-      open: 99.2,
-      high: 101.8 + previousScanCount,
-      low: 98.6,
-      volume: "Pending API",
-      rsi: 52 + previousScanCount,
-      macd: "Neutral",
-      atr: 2.4,
-      sentiment: "Pending live sentiment feed",
-      catalyst: "No live news connected yet",
-      support1: 99,
-      support2: 97.8,
-      resistance1: 102,
-      resistance2: 104.5,
-      invalidation: 97.8,
-      bias: "Neutral / waiting for confirmation",
-      confidence: 50,
-      meters: {
-        oscillators: { signal: "Neutral", sell: 3, neutral: 8, buy: 3 },
-        summary: { signal: "Neutral", sell: 5, neutral: 9, buy: 5 },
-        movingAverages: { signal: "Neutral", sell: 5, neutral: 5, buy: 5 },
-      },
-      summary:
-        "This is a placeholder scan. Once live APIs are connected, this card will return current price, indicators, sentiment, support, resistance, invalidation and trading bias.",
-    } satisfies Omit<Scan, "symbol" | "scanTime" | "scanDate" | "createdAt">);
-
-  const drift = previousScanCount === 0 ? 0 : (previousScanCount * 0.37) / 100;
-  const adjustedPrice = Number((base.price * (1 + drift)).toFixed(2));
-  const now = new Date();
-
-  const timeframeConfidenceBoost =
-    timeframe === "1m" ? -4 : timeframe === "5m" ? 0 : timeframe === "15m" ? 2 : timeframe === "1h" ? 4 : timeframe === "4h" ? 3 : 1;
-
-  return {
-    ...base,
-    confidence: Math.max(1, Math.min(99, base.confidence + timeframeConfidenceBoost)),
-    symbol: clean,
-    price: adjustedPrice,
-    scanTime: now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-    scanDate: now.toLocaleDateString(),
-    createdAt: now.toISOString(),
-  };
 }
 
 function signalScore(signal: MeterSignal) {
@@ -495,6 +328,8 @@ export default function SignalIXPage() {
   const [loaded, setLoaded] = useState(false);
   const [mode, setMode] = useState<ThemeMode>("navy");
   const [timeframe, setTimeframe] = useState<Timeframe>("5m");
+  const [isScanning, setIsScanning] = useState(false);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     try {
@@ -545,17 +380,40 @@ export default function SignalIXPage() {
   const latest = symbolScans[symbolScans.length - 1];
   const baseline = symbolScans[0];
 
-  function handleScan() {
-    if (!symbol.trim()) return;
+  async function handleScan() {
+    if (!symbol.trim() || isScanning) return;
+
     const clean = symbol.trim().toUpperCase();
-    const previousCount = scans.filter((scan) => scan.symbol === clean && scan.scanDate === todayKey()).length;
-    const nextScan = getMockScan(clean, previousCount, timeframe);
-    setActiveSymbol(clean);
-    setScans((current) => [...current, nextScan]);
+    setIsScanning(true);
+    setError("");
+
+    try {
+      const response = await fetch(`/api/scan?symbol=${encodeURIComponent(clean)}&timeframe=${encodeURIComponent(timeframe)}`, {
+        method: "GET",
+        cache: "no-store",
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.message || "Scan request failed.");
+      }
+
+      const nextScan = (await response.json()) as Scan;
+
+      setActiveSymbol(nextScan.symbol);
+      setSymbol(nextScan.symbol);
+      setScans((current) => [...current, nextScan]);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Something went wrong while scanning.";
+      setError(message);
+    } finally {
+      setIsScanning(false);
+    }
   }
 
   function clearToday() {
     setScans([]);
+    setError("");
     window.localStorage.removeItem(STORAGE_KEY);
   }
 
@@ -580,7 +438,7 @@ export default function SignalIXPage() {
 
           <div className="flex flex-wrap gap-2 text-xs">
             <span className={`rounded-full border px-3 py-1.5 ${theme[mode].badge}`}>MVP</span>
-            <span className={`rounded-full border px-3 py-1.5 ${theme[mode].badge}`}>signalix.cloud</span>
+            <span className={`rounded-full border px-3 py-1.5 ${theme[mode].badge}`}>API connected</span>
             <span className={`rounded-full border px-3 py-1.5 ${theme[mode].badge}`}>{scans.length} scans today</span>
 
             <button
@@ -606,9 +464,9 @@ export default function SignalIXPage() {
               />
             </div>
 
-            <Button mode={mode} onClick={handleScan} className="h-11">
-              <RefreshCw className="mr-2 h-4 w-4" />
-              Scan
+            <Button mode={mode} onClick={handleScan} disabled={isScanning} className="h-11">
+              <RefreshCw className={`mr-2 h-4 w-4 ${isScanning ? "animate-spin" : ""}`} />
+              {isScanning ? "Scanning" : "Scan"}
             </Button>
 
             <Button mode={mode} onClick={clearToday} variant="secondary" className="h-11">
@@ -617,6 +475,12 @@ export default function SignalIXPage() {
             </Button>
           </div>
         </Card>
+
+        {error && (
+          <div className={`mb-4 rounded-xl border p-3 text-sm ${theme[mode].error}`}>
+            {error}
+          </div>
+        )}
 
         <div className="mb-4 flex flex-wrap gap-2">
           {timeframes.map((item) => (
@@ -655,7 +519,7 @@ export default function SignalIXPage() {
                     <div>
                       <div className={`flex items-center gap-2 text-xs ${theme[mode].textSoft}`}>
                         <Clock className="h-3.5 w-3.5" />
-                        {latest.scanTime} · {latest.assetType} · {timeframe}
+                        {latest.scanTime} · {latest.assetType} · {latest.timeframe}
                       </div>
 
                       <h2 className={`mt-1 text-2xl font-semibold ${theme[mode].textMain}`}>
@@ -700,6 +564,7 @@ export default function SignalIXPage() {
                         <thead className={theme[mode].tableHead}>
                           <tr>
                             <th className="p-2.5">Time</th>
+                            <th className="p-2.5">TF</th>
                             <th className="p-2.5">Symbol</th>
                             <th className="p-2.5">Price</th>
                             <th className="p-2.5">Bias</th>
@@ -711,6 +576,7 @@ export default function SignalIXPage() {
                           {[...scans].reverse().map((scan, index) => (
                             <tr key={`${scan.symbol}-${scan.createdAt}-${index}`} className={`border-t ${theme[mode].tableRow}`}>
                               <td className="p-2.5">{scan.scanTime}</td>
+                              <td className="p-2.5">{scan.timeframe}</td>
                               <td className={`p-2.5 font-semibold ${theme[mode].textMain}`}>{scan.symbol}</td>
                               <td className="p-2.5">{formatPrice(scan.price)}</td>
                               <td className="p-2.5">{scan.bias}</td>
