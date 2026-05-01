@@ -11,6 +11,13 @@ type Meter = {
   buy: number;
 };
 
+type NewsItem = {
+  headline: string;
+  source: string;
+  url?: string;
+  datetime?: string;
+};
+
 type ScanResponse = {
   symbol: string;
   name: string;
@@ -39,11 +46,23 @@ type ScanResponse = {
   createdAt: string;
   timeframe: Timeframe;
   source: "live" | "fallback";
+  warning?: string;
+  news: NewsItem[];
   meters: {
     oscillators: Meter;
     summary: Meter;
     movingAverages: Meter;
   };
+};
+
+type BatchResponse = {
+  scans: ScanResponse[];
+  requestedSymbols: string[];
+  acceptedSymbols: string[];
+  rejectedSymbols: string[];
+  timeframe: Timeframe;
+  maxSymbols: number;
+  createdAt: string;
 };
 
 type Candle = {
@@ -127,11 +146,25 @@ type TwelveMaResponse = {
   message?: string;
 };
 
+type FinnhubNewsItem = {
+  category?: string;
+  datetime?: number;
+  headline?: string;
+  id?: number;
+  image?: string;
+  related?: string;
+  source?: string;
+  summary?: string;
+  url?: string;
+};
+
 const API_BASE = "https://api.twelvedata.com";
+const FINNHUB_BASE = "https://finnhub.io/api/v1";
+const MAX_SYMBOLS = 5;
 
 const mockMarketProfiles: Record<
   string,
-  Omit<ScanResponse, "symbol" | "scanTime" | "scanDate" | "createdAt" | "timeframe" | "source">
+  Omit<ScanResponse, "symbol" | "scanTime" | "scanDate" | "createdAt" | "timeframe" | "source" | "warning">
 > = {
   MARA: {
     name: "Marathon Digital Holdings",
@@ -154,6 +187,12 @@ const mockMarketProfiles: Record<
     invalidation: 10.68,
     bias: "Cautiously bullish",
     confidence: 64,
+    news: [
+      {
+        headline: "News feed ready for live connection",
+        source: "SignalIX",
+      },
+    ],
     meters: {
       oscillators: { signal: "Neutral", sell: 1, neutral: 9, buy: 1 },
       summary: { signal: "Buy", sell: 3, neutral: 10, buy: 13 },
@@ -176,7 +215,7 @@ const mockMarketProfiles: Record<
     macd: "Positive momentum",
     atr: 142,
     sentiment: "Constructive but sensitive to US futures",
-    catalyst: "European risk appetite and German index momentum",
+    catalyst: "European index momentum, US futures and EUR/USD sensitivity",
     support1: 23420,
     support2: 23370,
     resistance1: 23520,
@@ -184,6 +223,12 @@ const mockMarketProfiles: Record<
     invalidation: 23370,
     bias: "Bullish above support",
     confidence: 67,
+    news: [
+      {
+        headline: "Index news feed pending broader macro-news provider",
+        source: "SignalIX",
+      },
+    ],
     meters: {
       oscillators: { signal: "Buy", sell: 2, neutral: 6, buy: 4 },
       summary: { signal: "Buy", sell: 2, neutral: 8, buy: 15 },
@@ -206,7 +251,7 @@ const mockMarketProfiles: Record<
     macd: "Neutral-positive",
     atr: 31,
     sentiment: "Defensive bid",
-    catalyst: "Dollar and real-yield sensitivity",
+    catalyst: "Dollar direction, real yields and defensive demand",
     support1: 2325,
     support2: 2318,
     resistance1: 2345,
@@ -214,6 +259,12 @@ const mockMarketProfiles: Record<
     invalidation: 2318,
     bias: "Neutral to bullish",
     confidence: 59,
+    news: [
+      {
+        headline: "Commodity news feed pending broader macro-news provider",
+        source: "SignalIX",
+      },
+    ],
     meters: {
       oscillators: { signal: "Neutral", sell: 3, neutral: 7, buy: 3 },
       summary: { signal: "Neutral", sell: 5, neutral: 10, buy: 7 },
@@ -236,7 +287,7 @@ const mockMarketProfiles: Record<
     macd: "Neutral-positive",
     atr: 1850,
     sentiment: "Mixed",
-    catalyst: "Risk appetite, ETF flows and dollar conditions",
+    catalyst: "Crypto liquidity, ETF flows, dollar conditions and risk appetite",
     support1: 75800,
     support2: 75000,
     resistance1: 77200,
@@ -244,6 +295,12 @@ const mockMarketProfiles: Record<
     invalidation: 75000,
     bias: "Neutral to cautiously bullish",
     confidence: 57,
+    news: [
+      {
+        headline: "Crypto news feed pending broader crypto-news provider",
+        source: "SignalIX",
+      },
+    ],
     meters: {
       oscillators: { signal: "Neutral", sell: 3, neutral: 8, buy: 3 },
       summary: { signal: "Buy", sell: 4, neutral: 8, buy: 11 },
@@ -294,11 +351,13 @@ function confidenceAdjustment(timeframe: Timeframe) {
 
 function safeNumber(value: unknown, fallback = 0) {
   if (typeof value === "number" && Number.isFinite(value)) return value;
+
   if (typeof value === "string") {
     const cleaned = value.replace(/,/g, "");
     const parsed = Number(cleaned);
     if (Number.isFinite(parsed)) return parsed;
   }
+
   return fallback;
 }
 
@@ -319,9 +378,38 @@ function formatVolume(value: unknown) {
   return "N/A";
 }
 
+function normalizeSymbol(raw: string) {
+  return raw.trim().toUpperCase().replace(/\s+/g, "");
+}
+
+function parseSymbols(request: Request) {
+  const { searchParams } = new URL(request.url);
+
+  const rawSymbols =
+    searchParams.get("symbols") ||
+    searchParams.get("symbol") ||
+    "";
+
+  const requestedSymbols = rawSymbols
+    .split(",")
+    .map(normalizeSymbol)
+    .filter(Boolean);
+
+  const uniqueSymbols = Array.from(new Set(requestedSymbols));
+
+  const acceptedSymbols = uniqueSymbols.slice(0, MAX_SYMBOLS);
+  const rejectedSymbols = uniqueSymbols.slice(MAX_SYMBOLS);
+
+  return {
+    requestedSymbols: uniqueSymbols,
+    acceptedSymbols,
+    rejectedSymbols,
+  };
+}
+
 function getFallbackProfile(
   symbol: string
-): Omit<ScanResponse, "symbol" | "scanTime" | "scanDate" | "createdAt" | "timeframe" | "source"> {
+): Omit<ScanResponse, "symbol" | "scanTime" | "scanDate" | "createdAt" | "timeframe" | "source" | "warning"> {
   return (
     mockMarketProfiles[symbol] ?? {
       name: `${symbol} Market Instrument`,
@@ -344,18 +432,24 @@ function getFallbackProfile(
       invalidation: 97.8,
       bias: "Neutral / waiting for confirmation",
       confidence: 50,
+      news: [
+        {
+          headline: "News feed not connected for this symbol yet",
+          source: "SignalIX",
+        },
+      ],
       meters: {
         oscillators: { signal: "Neutral", sell: 3, neutral: 8, buy: 3 },
         summary: { signal: "Neutral", sell: 5, neutral: 9, buy: 5 },
         movingAverages: { signal: "Neutral", sell: 5, neutral: 5, buy: 5 },
       },
       summary:
-        "This is a placeholder scan. Once live APIs are connected, this card will return current price, indicators, sentiment, support, resistance, invalidation and trading bias.",
+        "This is a placeholder scan. Once live APIs are connected for this symbol, SignalIX will return current price, indicators, sentiment, support, resistance, invalidation and trading bias.",
     }
   );
 }
 
-function buildFallbackScan(symbol: string, timeframe: Timeframe): ScanResponse {
+function buildFallbackScan(symbol: string, timeframe: Timeframe, warning?: string): ScanResponse {
   const now = new Date();
   const base = getFallbackProfile(symbol);
   const adjustment = confidenceAdjustment(timeframe);
@@ -365,6 +459,7 @@ function buildFallbackScan(symbol: string, timeframe: Timeframe): ScanResponse {
     symbol,
     timeframe,
     source: "fallback",
+    warning,
     confidence: Math.max(1, Math.min(99, base.confidence + adjustment)),
     scanTime: now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
     scanDate: now.toLocaleDateString(),
@@ -407,6 +502,74 @@ async function fetchTwelve<T>(endpoint: string, params: Record<string, string>) 
   }
 
   return data;
+}
+
+function formatFinnhubDate(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+async function fetchNews(symbol: string): Promise<NewsItem[]> {
+  const apiKey = process.env.FINNHUB_API_KEY;
+
+  if (!apiKey) {
+    return [
+      {
+        headline: "News feed not connected yet. Add FINNHUB_API_KEY in Vercel to enable headlines.",
+        source: "SignalIX",
+      },
+    ];
+  }
+
+  const to = new Date();
+  const from = new Date();
+  from.setDate(to.getDate() - 7);
+
+  const url = new URL(`${FINNHUB_BASE}/company-news`);
+  url.searchParams.set("symbol", symbol);
+  url.searchParams.set("from", formatFinnhubDate(from));
+  url.searchParams.set("to", formatFinnhubDate(to));
+  url.searchParams.set("token", apiKey);
+
+  try {
+    const response = await fetch(url.toString(), {
+      method: "GET",
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      throw new Error(`Finnhub request failed: ${response.status}`);
+    }
+
+    const data = (await response.json()) as FinnhubNewsItem[];
+
+    const items = data
+      .filter((item) => item.headline)
+      .slice(0, 3)
+      .map((item) => ({
+        headline: item.headline || "Untitled headline",
+        source: item.source || "News",
+        url: item.url,
+        datetime: item.datetime ? new Date(item.datetime * 1000).toLocaleDateString() : undefined,
+      }));
+
+    if (items.length === 0) {
+      return [
+        {
+          headline: "No recent company headlines found for this symbol.",
+          source: "SignalIX",
+        },
+      ];
+    }
+
+    return items;
+  } catch {
+    return [
+      {
+        headline: "News temporarily unavailable for this symbol.",
+        source: "SignalIX",
+      },
+    ];
+  }
 }
 
 function calculateAtr(candles: Candle[], fallback: number) {
@@ -537,27 +700,12 @@ function signalFromScore(score: number): MeterSignal {
   return "Neutral";
 }
 
-function buildBias(summarySignal: MeterSignal, price: number, support1: number, resistance1: number) {
-  if (summarySignal === "Strong buy") {
-    return `Strong buy while holding above ${support1}`;
-  }
-
-  if (summarySignal === "Buy") {
-    return `Bullish above ${support1}`;
-  }
-
-  if (summarySignal === "Strong sell") {
-    return `Strong sell below ${resistance1}`;
-  }
-
-  if (summarySignal === "Sell") {
-    return `Bearish below ${resistance1}`;
-  }
-
-  const position =
-    price > resistance1 ? "neutral after breakout attempt" : price < support1 ? "neutral after support loss" : "neutral / waiting for confirmation";
-
-  return position;
+function buildBias(summarySignal: MeterSignal, support1: number, resistance1: number) {
+  if (summarySignal === "Strong buy") return `Strong buy above ${support1}`;
+  if (summarySignal === "Buy") return `Bullish above ${support1}`;
+  if (summarySignal === "Strong sell") return `Strong sell below ${resistance1}`;
+  if (summarySignal === "Sell") return `Bearish below ${resistance1}`;
+  return "Neutral / waiting for confirmation";
 }
 
 function buildConfidence(summarySignal: MeterSignal, rsi: number, price: number, support1: number, resistance1: number, timeframe: Timeframe) {
@@ -571,9 +719,8 @@ function buildConfidence(summarySignal: MeterSignal, rsi: number, price: number,
   return Math.max(1, Math.min(99, Math.round(confidence)));
 }
 
-function buildSummary({
+function compactSummary({
   symbol,
-  name,
   price,
   support1,
   support2,
@@ -586,7 +733,6 @@ function buildSummary({
   timeframe,
 }: {
   symbol: string;
-  name: string;
   price: number;
   support1: number;
   support2: number;
@@ -598,28 +744,74 @@ function buildSummary({
   macdText: string;
   timeframe: Timeframe;
 }) {
-  const direction =
-    summarySignal === "Strong buy" || summarySignal === "Buy"
-      ? "bullish"
-      : summarySignal === "Strong sell" || summarySignal === "Sell"
-        ? "bearish"
-        : "neutral";
-
-  if (direction === "bullish") {
-    return `${symbol} (${name}) is showing a ${direction} ${timeframe} technical structure around ${price}. The setup remains constructive while holding above ${support1}. A clean break and hold above ${resistance1} would support continuation toward ${resistance2}. RSI is ${rsi}, and MACD is ${macdText}. If price loses ${support2}, the setup weakens. Below ${invalidation}, the bullish read is invalidated.`;
+  if (summarySignal === "Buy" || summarySignal === "Strong buy") {
+    return `${symbol} is bullish on ${timeframe} around ${price}. Holds above ${support1} keeps the setup valid. Break above ${resistance1} opens ${resistance2}. RSI ${rsi}, MACD ${macdText}. Invalidation below ${invalidation}.`;
   }
 
-  if (direction === "bearish") {
-    return `${symbol} (${name}) is showing a ${direction} ${timeframe} technical structure around ${price}. The setup remains weak while trading below ${resistance1}. A rejection from this area could pressure price back toward ${support1} and ${support2}. RSI is ${rsi}, and MACD is ${macdText}. A clean recovery above ${resistance2} would reduce the bearish read.`;
+  if (summarySignal === "Sell" || summarySignal === "Strong sell") {
+    return `${symbol} is bearish on ${timeframe} around ${price}. Stays weak below ${resistance1}. Loss of ${support1} opens ${support2}. RSI ${rsi}, MACD ${macdText}. Recovery above ${resistance2} reduces the bearish read.`;
   }
 
-  return `${symbol} (${name}) is neutral on the ${timeframe} scan around ${price}. Price is trading between support at ${support1} and resistance at ${resistance1}. A break above ${resistance1} would improve the bullish case toward ${resistance2}; a loss of ${support1} would weaken the setup toward ${support2}. RSI is ${rsi}, and MACD is ${macdText}.`;
+  return `${symbol} is neutral on ${timeframe} around ${price}. Range: ${support1} support / ${resistance1} resistance. Break above ${resistance1} improves; loss of ${support1} weakens. RSI ${rsi}, MACD ${macdText}.`;
+}
+
+function inferRelatedAsset(symbol: string, assetType: string) {
+  const upper = symbol.toUpperCase();
+
+  if (upper.includes("MARA") || upper.includes("RIOT") || upper.includes("COIN") || upper.includes("BTC")) {
+    return "Bitcoin / crypto liquidity";
+  }
+
+  if (upper.includes("GOLD") || upper.includes("XAU")) {
+    return "USD / yields";
+  }
+
+  if (upper.includes("OIL") || upper.includes("WTI") || upper.includes("BRENT")) {
+    return "Crude oil / energy market";
+  }
+
+  if (upper.includes("DAX") || upper.includes("GER")) {
+    return "EUR/USD / European risk";
+  }
+
+  if (upper.includes("NASDAQ") || upper.includes("QQQ") || upper.includes("NQ")) {
+    return "US tech risk appetite";
+  }
+
+  if (assetType.toLowerCase().includes("crypto")) {
+    return "Crypto market liquidity";
+  }
+
+  if (assetType.toLowerCase().includes("forex")) {
+    return "FX macro conditions";
+  }
+
+  return "Broader market context";
+}
+
+function inferSentiment(signal: MeterSignal, rsi: number) {
+  if (signal === "Strong buy") return "Strong positive";
+  if (signal === "Buy") return rsi > 70 ? "Positive but stretched" : "Positive";
+  if (signal === "Strong sell") return "Strong negative";
+  if (signal === "Sell") return rsi < 30 ? "Negative but oversold" : "Negative";
+  return "Neutral / mixed";
+}
+
+function inferCatalyst(symbol: string, assetType: string, relatedAsset: string) {
+  const upper = symbol.toUpperCase();
+
+  if (upper.includes("MARA")) return "Bitcoin correlation, crypto miner momentum and risk appetite";
+  if (upper.includes("BTC")) return "Crypto liquidity, ETF flows, dollar conditions and risk appetite";
+  if (upper.includes("GOLD") || upper.includes("XAU")) return "Dollar direction, real yields and defensive demand";
+  if (upper.includes("DAX") || upper.includes("GER")) return "European index momentum, US futures and EUR/USD sensitivity";
+
+  return `${assetType} momentum with ${relatedAsset}`;
 }
 
 async function buildLiveScan(symbol: string, timeframe: Timeframe): Promise<ScanResponse> {
   const interval = toTwelveInterval(timeframe);
 
-  const [quote, timeSeries, rsiResponse, macdResponse, ma20Response, ma50Response] = await Promise.all([
+  const [quote, timeSeries, rsiResponse, macdResponse, ma20Response, ma50Response, news] = await Promise.all([
     fetchTwelve<TwelveQuote>("quote", { symbol }),
     fetchTwelve<TwelveTimeSeries>("time_series", {
       symbol,
@@ -649,6 +841,7 @@ async function buildLiveScan(symbol: string, timeframe: Timeframe): Promise<Scan
       time_period: "50",
       outputsize: "1",
     }).catch(() => null),
+    fetchNews(symbol),
   ]);
 
   const candles = timeSeries.values ?? [];
@@ -659,10 +852,7 @@ async function buildLiveScan(symbol: string, timeframe: Timeframe): Promise<Scan
 
   const latestCandle = candles[0];
 
-  const price = round(
-    safeNumber(quote.close, safeNumber(latestCandle.close, 0)),
-    2
-  );
+  const price = round(safeNumber(quote.close, safeNumber(latestCandle.close, 0)), 2);
 
   if (!price) {
     throw new Error("No valid price returned by Twelve Data.");
@@ -716,7 +906,7 @@ async function buildLiveScan(symbol: string, timeframe: Timeframe): Promise<Scan
   const sentiment = inferSentiment(summarySignal, rsi);
   const catalyst = inferCatalyst(symbol, assetType, relatedAsset);
 
-  const bias = buildBias(summarySignal, price, levels.support1, levels.resistance1);
+  const bias = buildBias(summarySignal, levels.support1, levels.resistance1);
   const confidence = buildConfidence(summarySignal, rsi, price, levels.support1, levels.resistance1, timeframe);
 
   const now = new Date();
@@ -744,11 +934,11 @@ async function buildLiveScan(symbol: string, timeframe: Timeframe): Promise<Scan
     bias,
     confidence,
     meters,
+    news,
     timeframe,
     source: "live",
-    summary: buildSummary({
+    summary: compactSummary({
       symbol,
-      name,
       price,
       support1: levels.support1,
       support2: levels.support2,
@@ -766,102 +956,48 @@ async function buildLiveScan(symbol: string, timeframe: Timeframe): Promise<Scan
   };
 }
 
-function inferRelatedAsset(symbol: string, assetType: string) {
-  const upper = symbol.toUpperCase();
+async function scanSymbol(symbol: string, timeframe: Timeframe): Promise<ScanResponse> {
+  try {
+    return await buildLiveScan(symbol, timeframe);
+  } catch (error) {
+    const warning =
+      error instanceof Error
+        ? `Live data unavailable. Fallback scan used. Reason: ${error.message}`
+        : "Live data unavailable. Fallback scan used.";
 
-  if (upper.includes("MARA") || upper.includes("RIOT") || upper.includes("COIN") || upper.includes("BTC")) {
-    return "Bitcoin / crypto liquidity";
+    return buildFallbackScan(symbol, timeframe, warning);
   }
-
-  if (upper.includes("GOLD") || upper.includes("XAU")) {
-    return "USD / yields";
-  }
-
-  if (upper.includes("OIL") || upper.includes("WTI") || upper.includes("BRENT")) {
-    return "Crude oil / energy market";
-  }
-
-  if (upper.includes("DAX") || upper.includes("GER")) {
-    return "EUR/USD / European risk";
-  }
-
-  if (upper.includes("NASDAQ") || upper.includes("QQQ") || upper.includes("NQ")) {
-    return "US tech risk appetite";
-  }
-
-  if (assetType.toLowerCase().includes("crypto")) {
-    return "Crypto market liquidity";
-  }
-
-  if (assetType.toLowerCase().includes("forex")) {
-    return "FX macro conditions";
-  }
-
-  return "Broader market context";
-}
-
-function inferSentiment(signal: MeterSignal, rsi: number) {
-  if (signal === "Strong buy") return "Strong positive";
-  if (signal === "Buy") return rsi > 70 ? "Positive but stretched" : "Positive";
-  if (signal === "Strong sell") return "Strong negative";
-  if (signal === "Sell") return rsi < 30 ? "Negative but oversold" : "Negative";
-  return "Neutral / mixed";
-}
-
-function inferCatalyst(symbol: string, assetType: string, relatedAsset: string) {
-  const upper = symbol.toUpperCase();
-
-  if (upper.includes("MARA")) {
-    return "Bitcoin correlation, crypto miner momentum and risk appetite";
-  }
-
-  if (upper.includes("BTC")) {
-    return "Crypto liquidity, ETF flows, dollar conditions and risk appetite";
-  }
-
-  if (upper.includes("GOLD") || upper.includes("XAU")) {
-    return "Dollar direction, real yields and defensive demand";
-  }
-
-  if (upper.includes("DAX") || upper.includes("GER")) {
-    return "European index momentum, US futures and EUR/USD sensitivity";
-  }
-
-  return `${assetType} momentum with ${relatedAsset}`;
 }
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
 
-  const rawSymbol = searchParams.get("symbol");
   const rawTimeframe = searchParams.get("timeframe");
+  const timeframe: Timeframe = isTimeframe(rawTimeframe) ? rawTimeframe : "5m";
 
-  const symbol = rawSymbol?.trim().toUpperCase();
+  const { requestedSymbols, acceptedSymbols, rejectedSymbols } = parseSymbols(request);
 
-  if (!symbol) {
+  if (acceptedSymbols.length === 0) {
     return NextResponse.json(
       {
         error: "Missing symbol",
-        message: "Please provide a symbol, for example /api/scan?symbol=MARA&timeframe=5m",
+        message: "Please provide one or more symbols, for example /api/scan?symbols=MARA,TSLA,NVDA&timeframe=5m",
       },
       { status: 400 }
     );
   }
 
-  const timeframe: Timeframe = isTimeframe(rawTimeframe) ? rawTimeframe : "5m";
+  const scans = await Promise.all(acceptedSymbols.map((symbol) => scanSymbol(symbol, timeframe)));
 
-  try {
-    const liveScan = await buildLiveScan(symbol, timeframe);
-    return NextResponse.json(liveScan);
-  } catch (error) {
-    const fallback = buildFallbackScan(symbol, timeframe);
+  const batch: BatchResponse = {
+    scans,
+    requestedSymbols,
+    acceptedSymbols,
+    rejectedSymbols,
+    timeframe,
+    maxSymbols: MAX_SYMBOLS,
+    createdAt: new Date().toISOString(),
+  };
 
-    return NextResponse.json({
-      ...fallback,
-      warning:
-        error instanceof Error
-          ? `Live data unavailable. Fallback scan used. Reason: ${error.message}`
-          : "Live data unavailable. Fallback scan used.",
-    });
-  }
+  return NextResponse.json(batch);
 }
