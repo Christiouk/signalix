@@ -3,13 +3,13 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   Activity,
+  AlertTriangle,
   BarChart3,
   Clock,
-  Database,
   Moon,
+  Newspaper,
   RefreshCw,
   Search,
-  ShieldAlert,
   Sun,
   Trash2,
   TrendingDown,
@@ -25,6 +25,13 @@ type Meter = {
   sell: number;
   neutral: number;
   buy: number;
+};
+
+type NewsItem = {
+  headline: string;
+  source: string;
+  url?: string;
+  datetime?: string;
 };
 
 type Scan = {
@@ -56,6 +63,7 @@ type Scan = {
   timeframe: Timeframe;
   source?: "live" | "fallback";
   warning?: string;
+  news?: NewsItem[];
   meters: {
     oscillators: Meter;
     summary: Meter;
@@ -63,7 +71,17 @@ type Scan = {
   };
 };
 
-const STORAGE_KEY = "signalix_scans_v1";
+type BatchScanResponse = {
+  scans: Scan[];
+  requestedSymbols: string[];
+  acceptedSymbols: string[];
+  rejectedSymbols: string[];
+  timeframe: Timeframe;
+  maxSymbols: number;
+  createdAt: string;
+};
+
+const STORAGE_KEY = "signalix_scans_v2";
 const THEME_KEY = "signalix_theme_v1";
 const TIMEFRAME_KEY = "signalix_timeframe_v1";
 
@@ -82,11 +100,10 @@ const theme = {
     textMuted: "text-slate-500",
     badge: "border-slate-800 bg-slate-950 text-slate-300",
     buttonSecondary: "border-slate-800 bg-slate-950 text-slate-200 hover:bg-slate-900",
-    tableHead: "bg-black/40 text-slate-500",
-    tableRow: "border-slate-800 text-slate-300",
     activeTab: "bg-white text-black border-white",
     tab: "border-slate-800 bg-slate-950 text-slate-400 hover:bg-slate-900",
     error: "border-red-900/60 bg-red-950/30 text-red-200",
+    warning: "border-amber-400/30 bg-amber-500/10 text-amber-200",
   },
   light: {
     page: "bg-slate-100 text-slate-950",
@@ -100,13 +117,62 @@ const theme = {
     textMuted: "text-slate-500",
     badge: "border-slate-300 bg-white text-slate-700",
     buttonSecondary: "border-slate-300 bg-white text-slate-800 hover:bg-slate-100",
-    tableHead: "bg-slate-100 text-slate-500",
-    tableRow: "border-slate-200 text-slate-700",
     activeTab: "bg-slate-950 text-white border-slate-950",
     tab: "border-slate-300 bg-white text-slate-600 hover:bg-slate-100",
     error: "border-red-200 bg-red-50 text-red-700",
+    warning: "border-amber-300 bg-amber-50 text-amber-700",
   },
 };
+
+function todayKey() {
+  return new Date().toLocaleDateString();
+}
+
+function formatPrice(value: number) {
+  if (!Number.isFinite(value)) return "—";
+  if (Math.abs(value) >= 1000) return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  if (Math.abs(value) >= 100) return value.toFixed(2);
+  if (Math.abs(value) >= 10) return value.toFixed(2);
+  return value.toFixed(4).replace(/\.?0+$/, "");
+}
+
+function parseSymbolsInput(input: string) {
+  return Array.from(
+    new Set(
+      input
+        .split(",")
+        .map((item) => item.trim().toUpperCase().replace(/\s+/g, ""))
+        .filter(Boolean)
+    )
+  );
+}
+
+function signalScore(signal: MeterSignal) {
+  switch (signal) {
+    case "Strong sell":
+      return 8;
+    case "Sell":
+      return 27;
+    case "Neutral":
+      return 50;
+    case "Buy":
+      return 73;
+    case "Strong buy":
+      return 92;
+  }
+}
+
+function signalClass(signal: MeterSignal, mode: ThemeMode) {
+  if (signal.includes("buy") || signal === "Buy") {
+    return mode === "navy" ? "text-emerald-300" : "text-emerald-700";
+  }
+
+  if (signal.includes("sell") || signal === "Sell") {
+    return mode === "navy" ? "text-rose-300" : "text-rose-700";
+  }
+
+  return mode === "navy" ? "text-slate-300" : "text-slate-700";
+}
 
 function Card({
   className = "",
@@ -153,77 +219,10 @@ function Button({
   );
 }
 
-function formatPrice(value: number) {
-  if (value >= 1000) return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
-  return value.toFixed(2);
-}
-
-function todayKey() {
-  return new Date().toLocaleDateString();
-}
-
-function signalScore(signal: MeterSignal) {
-  switch (signal) {
-    case "Strong sell":
-      return 8;
-    case "Sell":
-      return 27;
-    case "Neutral":
-      return 50;
-    case "Buy":
-      return 73;
-    case "Strong buy":
-      return 92;
-  }
-}
-
-function signalClass(signal: MeterSignal, mode: ThemeMode) {
-  if (signal.includes("buy") || signal === "Buy") {
-    return mode === "navy" ? "text-blue-300" : "text-blue-700";
-  }
-
-  if (signal.includes("sell") || signal === "Sell") {
-    return mode === "navy" ? "text-rose-300" : "text-rose-700";
-  }
-
-  return mode === "navy" ? "text-slate-300" : "text-slate-700";
-}
-
 function SourceBadge({ source, mode }: { source?: "live" | "fallback"; mode: ThemeMode }) {
   if (source === "live") {
     return (
-      <div className="inline-flex items-center gap-2 rounded-full border border-emerald-400/50 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-300 shadow-[0_0_18px_rgba(16,185,129,0.35)]">
-        <span className="relative flex h-2.5 w-2.5">
-          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-          <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400" />
-        </span>
-        LIVE DATA
-      </div>
-    );
-  }
-
-  if (source === "fallback") {
-    return (
-      <div
-        className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold ${
-          mode === "navy"
-            ? "border-amber-400/40 bg-amber-500/10 text-amber-300"
-            : "border-amber-300 bg-amber-50 text-amber-700"
-        }`}
-      >
-        <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />
-        FALLBACK DATA
-      </div>
-    );
-  }
-
-  return null;
-}
-
-function SourceMiniBadge({ source, mode }: { source?: "live" | "fallback"; mode: ThemeMode }) {
-  if (source === "live") {
-    return (
-      <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-400/40 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-400/50 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-300 shadow-[0_0_14px_rgba(16,185,129,0.32)]">
         <span className="relative flex h-1.5 w-1.5">
           <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
           <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
@@ -247,7 +246,26 @@ function SourceMiniBadge({ source, mode }: { source?: "live" | "fallback"; mode:
   );
 }
 
-function TechnicalMeter({
+function BiasBadge({ bias, mode }: { bias: string; mode: ThemeMode }) {
+  const lower = bias.toLowerCase();
+  const isBullish = lower.includes("bullish") || lower.includes("buy");
+  const isBearish = lower.includes("bearish") || lower.includes("sell");
+
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${theme[mode].badge}`}>
+      {isBullish ? (
+        <TrendingUp className="h-3 w-3" />
+      ) : isBearish ? (
+        <TrendingDown className="h-3 w-3" />
+      ) : (
+        <Activity className="h-3 w-3" />
+      )}
+      {bias}
+    </span>
+  );
+}
+
+function MiniMeter({
   title,
   meter,
   mode,
@@ -260,136 +278,187 @@ function TechnicalMeter({
   const rotation = -90 + (score / 100) * 180;
 
   return (
-    <Card mode={mode}>
-      <div className="p-4">
-        <div className="mb-3 flex items-center justify-between">
-          <h3 className={`text-sm font-semibold ${theme[mode].textMain}`}>{title}</h3>
-          <span className={`text-xs font-semibold ${signalClass(meter.signal, mode)}`}>{meter.signal}</span>
-        </div>
-
-        <div className="relative mx-auto h-20 w-40 overflow-hidden">
-          <div className={`absolute left-0 top-0 h-40 w-40 rounded-full border-[10px] ${mode === "navy" ? "border-slate-800" : "border-slate-200"}`} />
-          <div className="absolute left-0 top-0 h-40 w-40 rounded-full border-[10px] border-transparent border-l-rose-500 border-t-rose-500 border-r-blue-500" />
-          <div
-            className="absolute bottom-0 left-1/2 h-16 w-[2px] origin-bottom rounded-full bg-current transition-transform"
-            style={{ transform: `translateX(-50%) rotate(${rotation}deg)` }}
-          />
-          <div className={`absolute bottom-0 left-1/2 h-2 w-2 -translate-x-1/2 rounded-full ${mode === "navy" ? "bg-white" : "bg-slate-950"}`} />
-        </div>
-
-        <div className={`mt-1 text-center text-lg font-semibold ${signalClass(meter.signal, mode)}`}>{meter.signal}</div>
-
-        <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-          <div>
-            <div className={`text-[10px] uppercase tracking-[0.16em] ${theme[mode].textMuted}`}>Sell</div>
-            <div className={`text-sm font-semibold ${theme[mode].textMain}`}>{meter.sell}</div>
-          </div>
-          <div>
-            <div className={`text-[10px] uppercase tracking-[0.16em] ${theme[mode].textMuted}`}>Neutral</div>
-            <div className={`text-sm font-semibold ${theme[mode].textMain}`}>{meter.neutral}</div>
-          </div>
-          <div>
-            <div className={`text-[10px] uppercase tracking-[0.16em] ${theme[mode].textMuted}`}>Buy</div>
-            <div className={`text-sm font-semibold ${theme[mode].textMain}`}>{meter.buy}</div>
-          </div>
-        </div>
+    <div className={`rounded-xl border p-3 ${theme[mode].cardSoft}`}>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className={`text-[10px] uppercase tracking-[0.14em] ${theme[mode].textMuted}`}>{title}</span>
+        <span className={`text-[11px] font-semibold ${signalClass(meter.signal, mode)}`}>{meter.signal}</span>
       </div>
-    </Card>
+
+      <div className="relative mx-auto h-10 w-20 overflow-hidden">
+        <div className={`absolute left-0 top-0 h-20 w-20 rounded-full border-[6px] ${mode === "navy" ? "border-slate-800" : "border-slate-200"}`} />
+        <div className="absolute left-0 top-0 h-20 w-20 rounded-full border-[6px] border-transparent border-l-rose-500 border-t-rose-500 border-r-emerald-500" />
+        <div
+          className="absolute bottom-0 left-1/2 h-8 w-[2px] origin-bottom rounded-full bg-current transition-transform"
+          style={{ transform: `translateX(-50%) rotate(${rotation}deg)` }}
+        />
+        <div className={`absolute bottom-0 left-1/2 h-1.5 w-1.5 -translate-x-1/2 rounded-full ${mode === "navy" ? "bg-white" : "bg-slate-950"}`} />
+      </div>
+
+      <div className={`mt-1 grid grid-cols-3 text-center text-[10px] ${theme[mode].textMuted}`}>
+        <span>S {meter.sell}</span>
+        <span>N {meter.neutral}</span>
+        <span>B {meter.buy}</span>
+      </div>
+    </div>
   );
 }
 
 function Metric({
   label,
   value,
-  compact = false,
   mode,
 }: {
   label: string;
   value: React.ReactNode;
-  compact?: boolean;
   mode: ThemeMode;
 }) {
   return (
-    <div className={`rounded-xl border ${theme[mode].cardSoft} ${compact ? "p-3" : "p-4"}`}>
-      <div className={`text-[10px] uppercase tracking-[0.16em] ${theme[mode].textMuted}`}>{label}</div>
-      <div className={`${compact ? "mt-1 text-sm" : "mt-2 text-base"} font-semibold ${theme[mode].textMain}`}>
-        {value}
-      </div>
+    <div className={`rounded-xl border p-2.5 ${theme[mode].cardSoft}`}>
+      <div className={`text-[9px] uppercase tracking-[0.14em] ${theme[mode].textMuted}`}>{label}</div>
+      <div className={`mt-1 text-sm font-semibold ${theme[mode].textMain}`}>{value}</div>
     </div>
   );
 }
 
-function BiasBadge({ bias, mode }: { bias: string; mode: ThemeMode }) {
-  const lower = bias.toLowerCase();
-  const isBullish = lower.includes("bullish");
-  const isNeutral = lower.includes("neutral");
-
-  return (
-    <div className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs ${theme[mode].badge}`}>
-      {isBullish ? (
-        <TrendingUp className="h-3.5 w-3.5" />
-      ) : isNeutral ? (
-        <Activity className="h-3.5 w-3.5" />
-      ) : (
-        <TrendingDown className="h-3.5 w-3.5" />
-      )}
-      {bias}
-    </div>
-  );
+function getBaseline(scans: Scan[], symbol: string) {
+  return scans.find((scan) => scan.symbol === symbol && scan.scanDate === todayKey());
 }
 
-function ComparisonCard({
+function ScanCard({
+  scan,
   baseline,
-  latest,
   mode,
 }: {
+  scan: Scan;
   baseline?: Scan;
-  latest?: Scan;
   mode: ThemeMode;
 }) {
-  if (!baseline || !latest) return null;
-
-  const change = ((latest.price - baseline.price) / baseline.price) * 100;
-  const sameScan = baseline.createdAt === latest.createdAt;
+  const changeFromBaseline =
+    baseline && baseline.createdAt !== scan.createdAt
+      ? ((scan.price - baseline.price) / baseline.price) * 100
+      : null;
 
   return (
-    <Card mode={mode}>
+    <Card mode={mode} className="overflow-hidden">
       <div className="p-4">
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <div>
-            <div className={`text-[10px] uppercase tracking-[0.2em] ${theme[mode].textMuted}`}>Daily comparison</div>
-            <h2 className={`mt-0.5 text-lg font-semibold ${theme[mode].textMain}`}>First scan vs latest</h2>
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className={`flex items-center gap-2 text-[11px] ${theme[mode].textSoft}`}>
+              <Clock className="h-3 w-3" />
+              <span>{scan.scanTime}</span>
+              <span>·</span>
+              <span>{scan.timeframe}</span>
+              <span>·</span>
+              <span className="truncate">{scan.assetType}</span>
+            </div>
+
+            <div className="mt-1 flex flex-wrap items-center gap-2">
+              <h2 className={`text-xl font-semibold leading-none ${theme[mode].textMain}`}>{scan.symbol}</h2>
+              <SourceBadge mode={mode} source={scan.source} />
+            </div>
+
+            <p className={`mt-1 max-w-[320px] truncate text-xs ${theme[mode].textMuted}`}>{scan.name}</p>
           </div>
-          <Database className={`h-4 w-4 ${theme[mode].textSoft}`} />
+
+          <div className="text-right">
+            <div className={`text-2xl font-semibold leading-none ${theme[mode].textMain}`}>{formatPrice(scan.price)}</div>
+            <div className={`mt-1 text-[11px] ${theme[mode].textSoft}`}>Conf. {scan.confidence}%</div>
+            {changeFromBaseline !== null && (
+              <div className={`mt-1 text-[11px] font-semibold ${changeFromBaseline >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                {changeFromBaseline >= 0 ? "+" : ""}
+                {changeFromBaseline.toFixed(2)}%
+              </div>
+            )}
+          </div>
         </div>
 
-        <div className="grid gap-3 md:grid-cols-3">
-          <Metric compact mode={mode} label="First" value={`${baseline.scanTime} / ${formatPrice(baseline.price)}`} />
-          <Metric compact mode={mode} label="Latest" value={`${latest.scanTime} / ${formatPrice(latest.price)}`} />
-          <Metric compact mode={mode} label="Move" value={sameScan ? "Baseline" : `${change >= 0 ? "+" : ""}${change.toFixed(2)}%`} />
+        <div className="mb-3 flex flex-wrap gap-2">
+          <BiasBadge mode={mode} bias={scan.bias} />
+          <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] ${theme[mode].badge}`}>
+            RSI {scan.rsi}
+          </span>
+          <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] ${theme[mode].badge}`}>
+            MACD {scan.macd}
+          </span>
         </div>
 
-        <p className={`mt-3 rounded-xl border p-3 text-sm leading-6 ${theme[mode].cardSoft} ${theme[mode].textSoft}`}>
-          {sameScan
-            ? `First scan saved as today's baseline for ${latest.symbol}.`
-            : `${latest.symbol} is ${change >= 0 ? "higher" : "lower"} by ${Math.abs(change).toFixed(
-                2
-              )}% versus the first scan. Latest bias: ${latest.bias}.`}
-        </p>
+        <div className="mb-3 grid grid-cols-3 gap-2">
+          <MiniMeter mode={mode} title="Osc." meter={scan.meters.oscillators} />
+          <MiniMeter mode={mode} title="Summary" meter={scan.meters.summary} />
+          <MiniMeter mode={mode} title="MA" meter={scan.meters.movingAverages} />
+        </div>
+
+        <div className="mb-3 grid grid-cols-4 gap-2">
+          <Metric mode={mode} label="High" value={formatPrice(scan.high)} />
+          <Metric mode={mode} label="Low" value={formatPrice(scan.low)} />
+          <Metric mode={mode} label="ATR" value={formatPrice(scan.atr)} />
+          <Metric mode={mode} label="Vol." value={scan.volume} />
+        </div>
+
+        <div className="mb-3 grid grid-cols-3 gap-2">
+          <Metric mode={mode} label="Support" value={formatPrice(scan.support1)} />
+          <Metric mode={mode} label="Resist." value={formatPrice(scan.resistance1)} />
+          <Metric mode={mode} label="Invalid." value={formatPrice(scan.invalidation)} />
+        </div>
+
+        <div className={`rounded-xl border p-3 ${theme[mode].cardSoft}`}>
+          <div className={`mb-1 text-[9px] uppercase tracking-[0.18em] ${theme[mode].textMuted}`}>Signal read</div>
+          <p className={`line-clamp-4 text-xs leading-5 ${theme[mode].textSoft}`}>{scan.summary}</p>
+        </div>
+
+        <div className={`mt-3 rounded-xl border p-3 ${theme[mode].cardSoft}`}>
+          <div className="mb-2 flex items-center gap-1.5">
+            <Newspaper className={`h-3.5 w-3.5 ${theme[mode].textMuted}`} />
+            <div className={`text-[9px] uppercase tracking-[0.18em] ${theme[mode].textMuted}`}>News</div>
+          </div>
+
+          <div className="space-y-2">
+            {(scan.news && scan.news.length > 0 ? scan.news.slice(0, 3) : [{ headline: "No news connected.", source: "SignalIX" }]).map((item, index) => (
+              <div key={`${scan.symbol}-news-${index}`} className="flex gap-2">
+                <span className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${mode === "navy" ? "bg-slate-500" : "bg-slate-400"}`} />
+                <div className="min-w-0">
+                  {item.url ? (
+                    <a href={item.url} target="_blank" rel="noreferrer" className={`line-clamp-2 text-xs leading-5 hover:underline ${theme[mode].textMain}`}>
+                      {item.headline}
+                    </a>
+                  ) : (
+                    <p className={`line-clamp-2 text-xs leading-5 ${theme[mode].textMain}`}>{item.headline}</p>
+                  )}
+                  <p className={`text-[10px] ${theme[mode].textMuted}`}>
+                    {item.source}
+                    {item.datetime ? ` · ${item.datetime}` : ""}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {scan.warning && (
+          <div className={`mt-3 flex gap-2 rounded-xl border p-3 text-xs leading-5 ${theme[mode].warning}`}>
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>{scan.warning}</span>
+          </div>
+        )}
       </div>
     </Card>
   );
 }
 
 export default function SignalIXPage() {
-  const [symbol, setSymbol] = useState("MARA");
-  const [scans, setScans] = useState<Scan[]>([]);
-  const [activeSymbol, setActiveSymbol] = useState("MARA");
+  const [symbolsInput, setSymbolsInput] = useState("MARA, TSLA, NVDA, AAPL, BTC");
+  const [sessionScans, setSessionScans] = useState<Scan[]>([]);
+  const [latestBatch, setLatestBatch] = useState<Scan[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [mode, setMode] = useState<ThemeMode>("navy");
   const [timeframe, setTimeframe] = useState<Timeframe>("5m");
   const [isScanning, setIsScanning] = useState(false);
   const [error, setError] = useState("");
+  const [batchWarning, setBatchWarning] = useState("");
+
+  const parsedSymbols = useMemo(() => parseSymbolsInput(symbolsInput), [symbolsInput]);
+  const acceptedPreview = parsedSymbols.slice(0, 5);
+  const rejectedPreview = parsedSymbols.slice(5);
 
   useEffect(() => {
     try {
@@ -407,15 +476,12 @@ export default function SignalIXPage() {
       if (saved) {
         const parsed = JSON.parse(saved) as Scan[];
         const todaysScans = parsed.filter((scan) => scan.scanDate === todayKey());
-        setScans(todaysScans);
-
-        if (todaysScans.length > 0) {
-          setActiveSymbol(todaysScans[todaysScans.length - 1].symbol);
-          setSymbol(todaysScans[todaysScans.length - 1].symbol);
-        }
+        setSessionScans(todaysScans);
+        setLatestBatch(todaysScans.slice(-5));
       }
     } catch {
-      setScans([]);
+      setSessionScans([]);
+      setLatestBatch([]);
     } finally {
       setLoaded(true);
     }
@@ -423,8 +489,8 @@ export default function SignalIXPage() {
 
   useEffect(() => {
     if (!loaded) return;
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(scans));
-  }, [scans, loaded]);
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(sessionScans));
+  }, [sessionScans, loaded]);
 
   useEffect(() => {
     if (!loaded) return;
@@ -436,19 +502,22 @@ export default function SignalIXPage() {
     window.localStorage.setItem(TIMEFRAME_KEY, timeframe);
   }, [timeframe, loaded]);
 
-  const symbolScans = useMemo(() => scans.filter((scan) => scan.symbol === activeSymbol), [scans, activeSymbol]);
-  const latest = symbolScans[symbolScans.length - 1];
-  const baseline = symbolScans[0];
-
   async function handleScan() {
-    if (!symbol.trim() || isScanning) return;
+    if (isScanning) return;
 
-    const clean = symbol.trim().toUpperCase();
+    const symbols = parseSymbolsInput(symbolsInput).slice(0, 5);
+
+    if (symbols.length === 0) {
+      setError("Enter at least one symbol.");
+      return;
+    }
+
     setIsScanning(true);
     setError("");
+    setBatchWarning("");
 
     try {
-      const response = await fetch(`/api/scan?symbol=${encodeURIComponent(clean)}&timeframe=${encodeURIComponent(timeframe)}`, {
+      const response = await fetch(`/api/scan?symbols=${encodeURIComponent(symbols.join(","))}&timeframe=${encodeURIComponent(timeframe)}`, {
         method: "GET",
         cache: "no-store",
       });
@@ -458,11 +527,16 @@ export default function SignalIXPage() {
         throw new Error(payload?.message || "Scan request failed.");
       }
 
-      const nextScan = (await response.json()) as Scan;
+      const payload = (await response.json()) as BatchScanResponse | Scan;
 
-      setActiveSymbol(nextScan.symbol);
-      setSymbol(nextScan.symbol);
-      setScans((current) => [...current, nextScan]);
+      const scans = "scans" in payload ? payload.scans : [payload];
+
+      setLatestBatch(scans);
+      setSessionScans((current) => [...current, ...scans]);
+
+      if ("rejectedSymbols" in payload && payload.rejectedSymbols.length > 0) {
+        setBatchWarning(`Only 5 symbols are scanned at once. Ignored: ${payload.rejectedSymbols.join(", ")}`);
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Something went wrong while scanning.";
       setError(message);
@@ -471,9 +545,11 @@ export default function SignalIXPage() {
     }
   }
 
-  function clearToday() {
-    setScans([]);
+  function clearSession() {
+    setSessionScans([]);
+    setLatestBatch([]);
     setError("");
+    setBatchWarning("");
     window.localStorage.removeItem(STORAGE_KEY);
   }
 
@@ -483,7 +559,7 @@ export default function SignalIXPage() {
 
   return (
     <main className={`min-h-screen p-3 md:p-5 ${theme[mode].page}`}>
-      <div className="mx-auto max-w-7xl">
+      <div className="mx-auto max-w-[1600px]">
         <header className={`mb-4 flex flex-col justify-between gap-3 border-b pb-4 md:flex-row md:items-center ${theme[mode].borderSoft}`}>
           <div className="flex items-center gap-2">
             <div className={`flex h-8 w-8 items-center justify-center rounded-xl border ${theme[mode].badge}`}>
@@ -492,14 +568,14 @@ export default function SignalIXPage() {
 
             <div>
               <h1 className={`text-xl font-semibold tracking-tight ${theme[mode].textMain}`}>SignalIX</h1>
-              <p className={`text-xs ${theme[mode].textMuted}`}>Market scan intelligence</p>
+              <p className={`text-xs ${theme[mode].textMuted}`}>Multi-asset scan intelligence</p>
             </div>
           </div>
 
           <div className="flex flex-wrap gap-2 text-xs">
             <span className={`rounded-full border px-3 py-1.5 ${theme[mode].badge}`}>MVP</span>
-            <span className={`rounded-full border px-3 py-1.5 ${theme[mode].badge}`}>API connected</span>
-            <span className={`rounded-full border px-3 py-1.5 ${theme[mode].badge}`}>{scans.length} scans today</span>
+            <span className={`rounded-full border px-3 py-1.5 ${theme[mode].badge}`}>Up to 5 symbols</span>
+            <span className={`rounded-full border px-3 py-1.5 ${theme[mode].badge}`}>{sessionScans.length} scans today</span>
 
             <button
               onClick={toggleTheme}
@@ -511,199 +587,80 @@ export default function SignalIXPage() {
           </div>
         </header>
 
-        <Card mode={mode} className="mb-4">
-          <div className="grid gap-3 p-3 md:grid-cols-[1fr_auto_auto]">
+        <Card mode={mode} className="mb-3">
+          <div className="grid gap-3 p-3 lg:grid-cols-[1fr_auto_auto]">
             <div className="relative">
               <Search className={`absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 ${theme[mode].textMuted}`} />
               <input
-                value={symbol}
-                onChange={(event) => setSymbol(event.target.value)}
+                value={symbolsInput}
+                onChange={(event) => setSymbolsInput(event.target.value)}
                 onKeyDown={(event) => event.key === "Enter" && handleScan()}
-                placeholder="Enter ticker: MARA, DAX, GOLD, BTC..."
+                placeholder="Enter up to 5 symbols: MARA, TSLA, NVDA, AAPL, BTC"
                 className={`h-11 w-full rounded-xl border pl-10 pr-4 text-sm outline-none transition ${theme[mode].input}`}
               />
             </div>
 
             <Button mode={mode} onClick={handleScan} disabled={isScanning} className="h-11">
               <RefreshCw className={`mr-2 h-4 w-4 ${isScanning ? "animate-spin" : ""}`} />
-              {isScanning ? "Scanning" : "Scan"}
+              {isScanning ? "Scanning" : `Scan ${acceptedPreview.length || ""}`}
             </Button>
 
-            <Button mode={mode} onClick={clearToday} variant="secondary" className="h-11">
+            <Button mode={mode} onClick={clearSession} variant="secondary" className="h-11">
               <Trash2 className="mr-2 h-4 w-4" />
               Clear
             </Button>
           </div>
         </Card>
 
-        {error && (
-          <div className={`mb-4 rounded-xl border p-3 text-sm ${theme[mode].error}`}>
-            {error}
+        <div className="mb-3 flex flex-col justify-between gap-3 lg:flex-row lg:items-center">
+          <div className="flex flex-wrap gap-2">
+            {timeframes.map((item) => (
+              <button
+                key={item}
+                onClick={() => setTimeframe(item)}
+                className={`rounded-xl border px-4 py-2 text-xs font-semibold transition ${
+                  timeframe === item ? theme[mode].activeTab : theme[mode].tab
+                }`}
+              >
+                {item}
+              </button>
+            ))}
           </div>
-        )}
 
-        <div className="mb-4 flex flex-wrap gap-2">
-          {timeframes.map((item) => (
-            <button
-              key={item}
-              onClick={() => setTimeframe(item)}
-              className={`rounded-xl border px-4 py-2 text-xs font-semibold transition ${
-                timeframe === item ? theme[mode].activeTab : theme[mode].tab
-              }`}
-            >
-              {item}
-            </button>
-          ))}
+          <div className={`text-xs ${theme[mode].textMuted}`}>
+            Current set:{" "}
+            <span className={theme[mode].textMain}>
+              {acceptedPreview.length ? acceptedPreview.join(", ") : "none"}
+            </span>
+            {rejectedPreview.length > 0 && (
+              <span className="text-amber-500"> · Ignored: {rejectedPreview.join(", ")}</span>
+            )}
+          </div>
         </div>
 
-        {!latest ? (
+        {error && <div className={`mb-3 rounded-xl border p-3 text-sm ${theme[mode].error}`}>{error}</div>}
+        {batchWarning && <div className={`mb-3 rounded-xl border p-3 text-sm ${theme[mode].warning}`}>{batchWarning}</div>}
+
+        {latestBatch.length === 0 ? (
           <Card mode={mode}>
             <div className="flex min-h-[220px] flex-col items-center justify-center p-8 text-center">
               <BarChart3 className={`mb-3 h-9 w-9 ${theme[mode].textMuted}`} />
               <h2 className={`text-xl font-semibold ${theme[mode].textMain}`}>No scan yet</h2>
-              <p className={`mt-2 max-w-xl text-sm ${theme[mode].textSoft}`}>Press Scan to create the first baseline reading for today.</p>
+              <p className={`mt-2 max-w-xl text-sm ${theme[mode].textSoft}`}>
+                Enter up to five symbols separated by commas, then press Scan.
+              </p>
             </div>
           </Card>
         ) : (
-          <div className="grid gap-4 xl:grid-cols-[1.35fr_0.65fr]">
-            <div className="space-y-4">
-              <div className="grid gap-4 lg:grid-cols-3">
-                <TechnicalMeter mode={mode} title="Oscillators" meter={latest.meters.oscillators} />
-                <TechnicalMeter mode={mode} title="Summary" meter={latest.meters.summary} />
-                <TechnicalMeter mode={mode} title="Moving Averages" meter={latest.meters.movingAverages} />
-              </div>
-
-              <Card mode={mode}>
-                <div className="p-4">
-                  <div className="mb-4 flex flex-col justify-between gap-3 md:flex-row md:items-start">
-                    <div>
-                      <div className={`flex items-center gap-2 text-xs ${theme[mode].textSoft}`}>
-                        <Clock className="h-3.5 w-3.5" />
-                        {latest.scanTime} · {latest.assetType} · {latest.timeframe}
-                      </div>
-
-                      <h2 className={`mt-1 text-2xl font-semibold ${theme[mode].textMain}`}>
-                        {latest.symbol} — {latest.name}
-                      </h2>
-
-                      <div className="mt-2 flex flex-wrap items-center gap-2">
-                        <BiasBadge mode={mode} bias={latest.bias} />
-                        <SourceBadge mode={mode} source={latest.source} />
-                      </div>
-                    </div>
-
-                    <div className={`rounded-2xl border p-4 text-right ${theme[mode].cardSoft}`}>
-                      <div className={`text-[10px] uppercase tracking-[0.18em] ${theme[mode].textMuted}`}>Price</div>
-                      <div className={`text-3xl font-semibold ${theme[mode].textMain}`}>{formatPrice(latest.price)}</div>
-                      <div className={`text-xs ${theme[mode].textSoft}`}>Confidence {latest.confidence}%</div>
-                    </div>
-                  </div>
-
-                  <div className="grid gap-3 md:grid-cols-4">
-                    <Metric compact mode={mode} label="Open" value={formatPrice(latest.open)} />
-                    <Metric compact mode={mode} label="High" value={formatPrice(latest.high)} />
-                    <Metric compact mode={mode} label="Low" value={formatPrice(latest.low)} />
-                    <Metric compact mode={mode} label="Volume" value={latest.volume} />
-                  </div>
-
-                  <div className={`mt-4 rounded-2xl border p-4 ${theme[mode].cardSoft}`}>
-                    <div className={`mb-1 text-[10px] uppercase tracking-[0.2em] ${theme[mode].textMuted}`}>Signal read</div>
-                    <p className={`text-sm leading-6 ${theme[mode].textSoft}`}>{latest.summary}</p>
-
-                    {latest.warning && (
-                      <div
-                        className={`mt-3 rounded-xl border p-3 text-xs leading-5 ${
-                          mode === "navy"
-                            ? "border-amber-400/30 bg-amber-500/10 text-amber-200"
-                            : "border-amber-300 bg-amber-50 text-amber-700"
-                        }`}
-                      >
-                        {latest.warning}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </Card>
-
-              <ComparisonCard mode={mode} baseline={baseline} latest={latest} />
-
-              {scans.length > 0 && (
-                <Card mode={mode}>
-                  <div className="p-4">
-                    <h3 className={`mb-3 text-lg font-semibold ${theme[mode].textMain}`}>Today’s scan history</h3>
-
-                    <div className={`overflow-hidden rounded-xl border ${theme[mode].border}`}>
-                      <table className="w-full text-left text-xs">
-                        <thead className={theme[mode].tableHead}>
-                          <tr>
-                            <th className="p-2.5">Time</th>
-                            <th className="p-2.5">TF</th>
-                            <th className="p-2.5">Source</th>
-                            <th className="p-2.5">Symbol</th>
-                            <th className="p-2.5">Price</th>
-                            <th className="p-2.5">Bias</th>
-                            <th className="p-2.5">Confidence</th>
-                          </tr>
-                        </thead>
-
-                        <tbody>
-                          {[...scans].reverse().map((scan, index) => (
-                            <tr key={`${scan.symbol}-${scan.createdAt}-${index}`} className={`border-t ${theme[mode].tableRow}`}>
-                              <td className="p-2.5">{scan.scanTime}</td>
-                              <td className="p-2.5">{scan.timeframe}</td>
-                              <td className="p-2.5">
-                                <SourceMiniBadge mode={mode} source={scan.source} />
-                              </td>
-                              <td className={`p-2.5 font-semibold ${theme[mode].textMain}`}>{scan.symbol}</td>
-                              <td className="p-2.5">{formatPrice(scan.price)}</td>
-                              <td className="p-2.5">{scan.bias}</td>
-                              <td className="p-2.5">{scan.confidence}%</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                </Card>
-              )}
-            </div>
-
-            <div className="space-y-4">
-              <Card mode={mode}>
-                <div className="p-4">
-                  <div className="mb-3 flex items-center justify-between">
-                    <h3 className={`text-lg font-semibold ${theme[mode].textMain}`}>Technicals</h3>
-                    <Activity className={`h-4 w-4 ${theme[mode].textSoft}`} />
-                  </div>
-
-                  <div className="grid gap-3">
-                    <Metric compact mode={mode} label="RSI" value={latest.rsi} />
-                    <Metric compact mode={mode} label="MACD" value={latest.macd} />
-                    <Metric compact mode={mode} label="ATR" value={latest.atr} />
-                    <Metric compact mode={mode} label="Sentiment" value={latest.sentiment} />
-                    <Metric compact mode={mode} label="Related" value={latest.relatedAsset} />
-                    <Metric compact mode={mode} label="Catalyst" value={latest.catalyst} />
-                  </div>
-                </div>
-              </Card>
-
-              <Card mode={mode}>
-                <div className="p-4">
-                  <div className="mb-3 flex items-center justify-between">
-                    <h3 className={`text-lg font-semibold ${theme[mode].textMain}`}>Levels</h3>
-                    <ShieldAlert className={`h-4 w-4 ${theme[mode].textSoft}`} />
-                  </div>
-
-                  <div className="grid gap-3">
-                    <Metric compact mode={mode} label="Support 1" value={formatPrice(latest.support1)} />
-                    <Metric compact mode={mode} label="Support 2" value={formatPrice(latest.support2)} />
-                    <Metric compact mode={mode} label="Resistance 1" value={formatPrice(latest.resistance1)} />
-                    <Metric compact mode={mode} label="Resistance 2" value={formatPrice(latest.resistance2)} />
-                    <Metric compact mode={mode} label="Invalidation" value={formatPrice(latest.invalidation)} />
-                  </div>
-                </div>
-              </Card>
-            </div>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
+            {latestBatch.map((scan) => (
+              <ScanCard
+                key={`${scan.symbol}-${scan.createdAt}`}
+                scan={scan}
+                baseline={getBaseline(sessionScans, scan.symbol)}
+                mode={mode}
+              />
+            ))}
           </div>
         )}
       </div>
