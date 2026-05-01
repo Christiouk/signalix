@@ -74,6 +74,15 @@ type Candle = {
   volume?: string;
 };
 
+type NumericCandle = {
+  datetime: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+};
+
 type TwelveQuote = {
   symbol?: string;
   name?: string;
@@ -117,49 +126,7 @@ type TwelveTimeSeries = {
   code?: number;
 };
 
-type TwelveRsiResponse = {
-  values?: Array<{
-    datetime: string;
-    rsi: string;
-  }>;
-  status?: string;
-  message?: string;
-};
-
-type TwelveMacdResponse = {
-  values?: Array<{
-    datetime: string;
-    macd: string;
-    macd_signal: string;
-    macd_hist: string;
-  }>;
-  status?: string;
-  message?: string;
-};
-
-type TwelveMaResponse = {
-  values?: Array<{
-    datetime: string;
-    ma: string;
-  }>;
-  status?: string;
-  message?: string;
-};
-
-type FinnhubNewsItem = {
-  category?: string;
-  datetime?: number;
-  headline?: string;
-  id?: number;
-  image?: string;
-  related?: string;
-  source?: string;
-  summary?: string;
-  url?: string;
-};
-
 const API_BASE = "https://api.twelvedata.com";
-const FINNHUB_BASE = "https://finnhub.io/api/v1";
 const MAX_SYMBOLS = 5;
 
 const mockMarketProfiles: Record<
@@ -200,78 +167,6 @@ const mockMarketProfiles: Record<
     },
     summary:
       "MARA is bullish intraday while holding above 11.30. A clean break and hold above 11.50 would support continuation toward 11.80–12.00. If price loses 11.10, the bullish setup weakens. Below 10.68, the setup is invalidated.",
-  },
-
-  DAX: {
-    name: "Germany 40 Index",
-    assetType: "Index",
-    relatedAsset: "EUR/USD",
-    price: 23480,
-    open: 23420,
-    high: 23525,
-    low: 23370,
-    volume: "Index volume varies",
-    rsi: 61,
-    macd: "Positive momentum",
-    atr: 142,
-    sentiment: "Constructive but sensitive to US futures",
-    catalyst: "European index momentum, US futures and EUR/USD sensitivity",
-    support1: 23420,
-    support2: 23370,
-    resistance1: 23520,
-    resistance2: 23620,
-    invalidation: 23370,
-    bias: "Bullish above support",
-    confidence: 67,
-    news: [
-      {
-        headline: "Index news feed pending broader macro-news provider",
-        source: "SignalIX",
-      },
-    ],
-    meters: {
-      oscillators: { signal: "Buy", sell: 2, neutral: 6, buy: 4 },
-      summary: { signal: "Buy", sell: 2, neutral: 8, buy: 15 },
-      movingAverages: { signal: "Strong buy", sell: 1, neutral: 2, buy: 14 },
-    },
-    summary:
-      "DAX is constructive while holding above 23,420. A break above 23,520 would confirm continuation. If the index loses 23,370, the bullish intraday setup fails and a deeper pullback becomes likely.",
-  },
-
-  GOLD: {
-    name: "Gold Spot",
-    assetType: "Commodity",
-    relatedAsset: "USD / Yields",
-    price: 2335,
-    open: 2328,
-    high: 2342,
-    low: 2319,
-    volume: "Spot liquidity",
-    rsi: 55,
-    macd: "Neutral-positive",
-    atr: 31,
-    sentiment: "Defensive bid",
-    catalyst: "Dollar direction, real yields and defensive demand",
-    support1: 2325,
-    support2: 2318,
-    resistance1: 2345,
-    resistance2: 2360,
-    invalidation: 2318,
-    bias: "Neutral to bullish",
-    confidence: 59,
-    news: [
-      {
-        headline: "Commodity news feed pending broader macro-news provider",
-        source: "SignalIX",
-      },
-    ],
-    meters: {
-      oscillators: { signal: "Neutral", sell: 3, neutral: 7, buy: 3 },
-      summary: { signal: "Neutral", sell: 5, neutral: 10, buy: 7 },
-      movingAverages: { signal: "Buy", sell: 3, neutral: 4, buy: 9 },
-    },
-    summary:
-      "Gold is neutral-to-bullish while holding above 2,325. A break above 2,345 improves the continuation case. Below 2,318, the setup weakens and price may revisit lower liquidity zones.",
   },
 
   BTC: {
@@ -385,10 +280,7 @@ function normalizeSymbol(raw: string) {
 function parseSymbols(request: Request) {
   const { searchParams } = new URL(request.url);
 
-  const rawSymbols =
-    searchParams.get("symbols") ||
-    searchParams.get("symbol") ||
-    "";
+  const rawSymbols = searchParams.get("symbols") || searchParams.get("symbol") || "";
 
   const requestedSymbols = rawSymbols
     .split(",")
@@ -504,94 +396,109 @@ async function fetchTwelve<T>(endpoint: string, params: Record<string, string>) 
   return data;
 }
 
-function formatFinnhubDate(date: Date) {
-  return date.toISOString().slice(0, 10);
+function candlesToNumeric(candles: Candle[]) {
+  return candles
+    .map((candle) => ({
+      datetime: candle.datetime,
+      open: safeNumber(candle.open),
+      high: safeNumber(candle.high),
+      low: safeNumber(candle.low),
+      close: safeNumber(candle.close),
+      volume: safeNumber(candle.volume),
+    }))
+    .filter((candle) => candle.open > 0 && candle.high > 0 && candle.low > 0 && candle.close > 0);
 }
 
-async function fetchNews(symbol: string): Promise<NewsItem[]> {
-  const apiKey = process.env.FINNHUB_API_KEY;
-
-  if (!apiKey) {
-    return [
-      {
-        headline: "News feed not connected yet. Add FINNHUB_API_KEY in Vercel to enable headlines.",
-        source: "SignalIX",
-      },
-    ];
-  }
-
-  const to = new Date();
-  const from = new Date();
-  from.setDate(to.getDate() - 7);
-
-  const url = new URL(`${FINNHUB_BASE}/company-news`);
-  url.searchParams.set("symbol", symbol);
-  url.searchParams.set("from", formatFinnhubDate(from));
-  url.searchParams.set("to", formatFinnhubDate(to));
-  url.searchParams.set("token", apiKey);
-
-  try {
-    const response = await fetch(url.toString(), {
-      method: "GET",
-      cache: "no-store",
-    });
-
-    if (!response.ok) {
-      throw new Error(`Finnhub request failed: ${response.status}`);
-    }
-
-    const data = (await response.json()) as FinnhubNewsItem[];
-
-    const items = data
-      .filter((item) => item.headline)
-      .slice(0, 3)
-      .map((item) => ({
-        headline: item.headline || "Untitled headline",
-        source: item.source || "News",
-        url: item.url,
-        datetime: item.datetime ? new Date(item.datetime * 1000).toLocaleDateString() : undefined,
-      }));
-
-    if (items.length === 0) {
-      return [
-        {
-          headline: "No recent company headlines found for this symbol.",
-          source: "SignalIX",
-        },
-      ];
-    }
-
-    return items;
-  } catch {
-    return [
-      {
-        headline: "News temporarily unavailable for this symbol.",
-        source: "SignalIX",
-      },
-    ];
-  }
+function average(values: number[]) {
+  if (values.length === 0) return 0;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
-function calculateAtr(candles: Candle[], fallback: number) {
+function calculateSma(values: number[], period: number) {
+  if (values.length < period) return values.length ? average(values) : 0;
+  return average(values.slice(-period));
+}
+
+function calculateEma(values: number[], period: number) {
+  if (values.length === 0) return 0;
+
+  const multiplier = 2 / (period + 1);
+  let ema = values[0];
+
+  for (let i = 1; i < values.length; i += 1) {
+    ema = values[i] * multiplier + ema * (1 - multiplier);
+  }
+
+  return ema;
+}
+
+function calculateRsi(closes: number[], period = 14) {
+  if (closes.length <= period) return 50;
+
+  let gains = 0;
+  let losses = 0;
+
+  for (let i = closes.length - period; i < closes.length; i += 1) {
+    const change = closes[i] - closes[i - 1];
+
+    if (change >= 0) {
+      gains += change;
+    } else {
+      losses += Math.abs(change);
+    }
+  }
+
+  const averageGain = gains / period;
+  const averageLoss = losses / period;
+
+  if (averageLoss === 0) return 100;
+
+  const rs = averageGain / averageLoss;
+  return 100 - 100 / (1 + rs);
+}
+
+function calculateMacd(closes: number[]) {
+  if (closes.length < 35) {
+    return {
+      macd: 0,
+      signal: 0,
+      hist: 0,
+    };
+  }
+
+  const macdSeries: number[] = [];
+
+  for (let i = 26; i <= closes.length; i += 1) {
+    const slice = closes.slice(0, i);
+    const ema12 = calculateEma(slice, 12);
+    const ema26 = calculateEma(slice, 26);
+    macdSeries.push(ema12 - ema26);
+  }
+
+  const macd = macdSeries[macdSeries.length - 1] ?? 0;
+  const signal = calculateEma(macdSeries, 9);
+  const hist = macd - signal;
+
+  return {
+    macd,
+    signal,
+    hist,
+  };
+}
+
+function calculateAtr(candles: NumericCandle[], fallback: number) {
   if (candles.length < 2) return fallback;
 
-  const ordered = [...candles].reverse();
   const trueRanges: number[] = [];
 
-  for (let i = 1; i < ordered.length; i += 1) {
-    const current = ordered[i];
-    const previous = ordered[i - 1];
-
-    const high = safeNumber(current.high);
-    const low = safeNumber(current.low);
-    const previousClose = safeNumber(previous.close);
-
-    if (!high || !low || !previousClose) continue;
+  for (let i = 1; i < candles.length; i += 1) {
+    const current = candles[i];
+    const previous = candles[i - 1];
 
     const trueRange = Math.max(
-      high - low,
-      Math.abs(high - previousClose),
-      Math.abs(low - previousClose)
+      current.high - current.low,
+      Math.abs(current.high - previous.close),
+      Math.abs(current.low - previous.close)
     );
 
     trueRanges.push(trueRange);
@@ -600,20 +507,19 @@ function calculateAtr(candles: Candle[], fallback: number) {
   const recent = trueRanges.slice(-14);
   if (recent.length === 0) return fallback;
 
-  const atr = recent.reduce((sum, value) => sum + value, 0) / recent.length;
-  return round(atr, 2);
+  return round(average(recent), 2);
 }
 
-function calculateSupportResistance(candles: Candle[], currentPrice: number) {
-  const recent = candles.slice(0, 30);
+function calculateSupportResistance(candles: NumericCandle[], currentPrice: number) {
+  const recent = candles.slice(-30);
 
   const lows = recent
-    .map((candle) => safeNumber(candle.low))
+    .map((candle) => candle.low)
     .filter((value) => value > 0)
     .sort((a, b) => a - b);
 
   const highs = recent
-    .map((candle) => safeNumber(candle.high))
+    .map((candle) => candle.high)
     .filter((value) => value > 0)
     .sort((a, b) => b - a);
 
@@ -808,82 +714,73 @@ function inferCatalyst(symbol: string, assetType: string, relatedAsset: string) 
   return `${assetType} momentum with ${relatedAsset}`;
 }
 
+function noNewsYet(symbol: string): NewsItem[] {
+  return [
+    {
+      headline: `News layer pending for ${symbol}. Next step: connect a separate news provider.`,
+      source: "SignalIX",
+    },
+  ];
+}
+
 async function buildLiveScan(symbol: string, timeframe: Timeframe): Promise<ScanResponse> {
   const interval = toTwelveInterval(timeframe);
 
-  const [quote, timeSeries, rsiResponse, macdResponse, ma20Response, ma50Response, news] = await Promise.all([
+  const [quote, timeSeries] = await Promise.all([
     fetchTwelve<TwelveQuote>("quote", { symbol }),
     fetchTwelve<TwelveTimeSeries>("time_series", {
       symbol,
       interval,
-      outputsize: "60",
+      outputsize: "100",
     }),
-    fetchTwelve<TwelveRsiResponse>("rsi", {
-      symbol,
-      interval,
-      time_period: "14",
-      outputsize: "1",
-    }).catch(() => null),
-    fetchTwelve<TwelveMacdResponse>("macd", {
-      symbol,
-      interval,
-      outputsize: "1",
-    }).catch(() => null),
-    fetchTwelve<TwelveMaResponse>("ma", {
-      symbol,
-      interval,
-      time_period: "20",
-      outputsize: "1",
-    }).catch(() => null),
-    fetchTwelve<TwelveMaResponse>("ma", {
-      symbol,
-      interval,
-      time_period: "50",
-      outputsize: "1",
-    }).catch(() => null),
-    fetchNews(symbol),
   ]);
 
-  const candles = timeSeries.values ?? [];
+  const rawCandles = timeSeries.values ?? [];
 
-  if (!candles.length) {
+  if (!rawCandles.length) {
     throw new Error("No candle data returned by Twelve Data.");
   }
 
-  const latestCandle = candles[0];
+  const candlesNewestFirst = candlesToNumeric(rawCandles);
+  const candlesOldestFirst = [...candlesNewestFirst].reverse();
 
-  const price = round(safeNumber(quote.close, safeNumber(latestCandle.close, 0)), 2);
+  if (candlesOldestFirst.length < 20) {
+    throw new Error("Not enough candle data returned by Twelve Data.");
+  }
+
+  const latestCandle = candlesNewestFirst[0];
+
+  const price = round(safeNumber(quote.close, latestCandle.close), 2);
 
   if (!price) {
     throw new Error("No valid price returned by Twelve Data.");
   }
 
-  const open = round(safeNumber(quote.open, safeNumber(latestCandle.open, price)), 2);
-  const high = round(safeNumber(quote.high, safeNumber(latestCandle.high, price)), 2);
-  const low = round(safeNumber(quote.low, safeNumber(latestCandle.low, price)), 2);
-  const volume = formatVolume(quote.volume ?? latestCandle.volume);
+  const open = round(safeNumber(quote.open, latestCandle.open), 2);
+  const high = round(safeNumber(quote.high, latestCandle.high), 2);
+  const low = round(safeNumber(quote.low, latestCandle.low), 2);
+  const volume = formatVolume(quote.volume || latestCandle.volume);
 
-  const rsi = round(safeNumber(rsiResponse?.values?.[0]?.rsi, 50), 2);
+  const closes = candlesOldestFirst.map((candle) => candle.close);
 
-  const macd = safeNumber(macdResponse?.values?.[0]?.macd, 0);
-  const macdSignal = safeNumber(macdResponse?.values?.[0]?.macd_signal, 0);
-  const macdHist = safeNumber(macdResponse?.values?.[0]?.macd_hist, 0);
+  const rsi = round(calculateRsi(closes), 2);
+  const macdValues = calculateMacd(closes);
 
   const macdText =
-    macd > macdSignal && macdHist > 0
+    macdValues.macd > macdValues.signal && macdValues.hist > 0
       ? "positive"
-      : macd < macdSignal && macdHist < 0
+      : macdValues.macd < macdValues.signal && macdValues.hist < 0
         ? "negative"
         : "neutral";
 
-  const ma20 = safeNumber(ma20Response?.values?.[0]?.ma, price);
-  const ma50 = safeNumber(ma50Response?.values?.[0]?.ma, price);
+  const ma20 = calculateSma(closes, 20);
+  const ma50 = calculateSma(closes, 50);
 
-  const atr = calculateAtr(candles, round(high - low, 2));
-  const levels = calculateSupportResistance(candles, price);
+  const atr = calculateAtr(candlesOldestFirst, round(high - low, 2));
+  const levels = calculateSupportResistance(candlesOldestFirst, price);
 
   const oscillatorSignal = signalFromScore(
-    (scoreSignal(analyseRsi(rsi)) + scoreSignal(analyseMacd(macd, macdSignal, macdHist))) / 2
+    (scoreSignal(analyseRsi(rsi)) + scoreSignal(analyseMacd(macdValues.macd, macdValues.signal, macdValues.hist))) / 2
   );
 
   const ma20Signal = analyseMovingAverage(price, ma20);
@@ -934,7 +831,7 @@ async function buildLiveScan(symbol: string, timeframe: Timeframe): Promise<Scan
     bias,
     confidence,
     meters,
-    news,
+    news: noNewsYet(symbol),
     timeframe,
     source: "live",
     summary: compactSummary({
