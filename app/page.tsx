@@ -54,6 +54,8 @@ type Scan = {
   scanDate: string;
   createdAt: string;
   timeframe: Timeframe;
+  source?: "live" | "fallback";
+  warning?: string;
   meters: {
     oscillators: Meter;
     summary: Meter;
@@ -185,6 +187,64 @@ function signalClass(signal: MeterSignal, mode: ThemeMode) {
   }
 
   return mode === "navy" ? "text-slate-300" : "text-slate-700";
+}
+
+function SourceBadge({ source, mode }: { source?: "live" | "fallback"; mode: ThemeMode }) {
+  if (source === "live") {
+    return (
+      <div className="inline-flex items-center gap-2 rounded-full border border-emerald-400/50 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-300 shadow-[0_0_18px_rgba(16,185,129,0.35)]">
+        <span className="relative flex h-2.5 w-2.5">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+          <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400" />
+        </span>
+        LIVE DATA
+      </div>
+    );
+  }
+
+  if (source === "fallback") {
+    return (
+      <div
+        className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold ${
+          mode === "navy"
+            ? "border-amber-400/40 bg-amber-500/10 text-amber-300"
+            : "border-amber-300 bg-amber-50 text-amber-700"
+        }`}
+      >
+        <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />
+        FALLBACK DATA
+      </div>
+    );
+  }
+
+  return null;
+}
+
+function SourceMiniBadge({ source, mode }: { source?: "live" | "fallback"; mode: ThemeMode }) {
+  if (source === "live") {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-400/40 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">
+        <span className="relative flex h-1.5 w-1.5">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+          <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
+        </span>
+        LIVE
+      </span>
+    );
+  }
+
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+        mode === "navy"
+          ? "border-amber-400/40 bg-amber-500/10 text-amber-300"
+          : "border-amber-300 bg-amber-50 text-amber-700"
+      }`}
+    >
+      <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+      FALLBACK
+    </span>
+  );
 }
 
 function TechnicalMeter({
@@ -526,8 +586,9 @@ export default function SignalIXPage() {
                         {latest.symbol} — {latest.name}
                       </h2>
 
-                      <div className="mt-2">
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
                         <BiasBadge mode={mode} bias={latest.bias} />
+                        <SourceBadge mode={mode} source={latest.source} />
                       </div>
                     </div>
 
@@ -548,6 +609,18 @@ export default function SignalIXPage() {
                   <div className={`mt-4 rounded-2xl border p-4 ${theme[mode].cardSoft}`}>
                     <div className={`mb-1 text-[10px] uppercase tracking-[0.2em] ${theme[mode].textMuted}`}>Signal read</div>
                     <p className={`text-sm leading-6 ${theme[mode].textSoft}`}>{latest.summary}</p>
+
+                    {latest.warning && (
+                      <div
+                        className={`mt-3 rounded-xl border p-3 text-xs leading-5 ${
+                          mode === "navy"
+                            ? "border-amber-400/30 bg-amber-500/10 text-amber-200"
+                            : "border-amber-300 bg-amber-50 text-amber-700"
+                        }`}
+                      >
+                        {latest.warning}
+                      </div>
+                    )}
                   </div>
                 </div>
               </Card>
@@ -565,6 +638,7 @@ export default function SignalIXPage() {
                           <tr>
                             <th className="p-2.5">Time</th>
                             <th className="p-2.5">TF</th>
+                            <th className="p-2.5">Source</th>
                             <th className="p-2.5">Symbol</th>
                             <th className="p-2.5">Price</th>
                             <th className="p-2.5">Bias</th>
@@ -577,6 +651,9 @@ export default function SignalIXPage() {
                             <tr key={`${scan.symbol}-${scan.createdAt}-${index}`} className={`border-t ${theme[mode].tableRow}`}>
                               <td className="p-2.5">{scan.scanTime}</td>
                               <td className="p-2.5">{scan.timeframe}</td>
+                              <td className="p-2.5">
+                                <SourceMiniBadge mode={mode} source={scan.source} />
+                              </td>
                               <td className={`p-2.5 font-semibold ${theme[mode].textMain}`}>{scan.symbol}</td>
                               <td className="p-2.5">{formatPrice(scan.price)}</td>
                               <td className="p-2.5">{scan.bias}</td>
